@@ -8,14 +8,21 @@ import {
   FileText,
   CheckSquare,
   MessageSquare,
-  Users,
   Clock,
   Globe,
   Check,
   Sun,
   Moon,
   ChevronRight,
-  X
+  X,
+  Search,
+  Edit2,
+  LogOut,
+  Sliders,
+  UploadCloud,
+  Palette,
+  Layout,
+  Image as ImageIcon
 } from 'lucide-react';
 
 declare global {
@@ -26,12 +33,35 @@ declare global {
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
 
+const unpackJson = async (res: Response) => {
+  const json = await res.json();
+  if (json && typeof json === 'object' && 'data' in json && 'statusCode' in json) {
+    return json.data;
+  }
+  return json;
+};
+
+const unpackError = async (res: Response, defaultMsg = 'An error occurred') => {
+  try {
+    const json = await res.json();
+    if (json && typeof json === 'object' && 'message' in json) {
+      return json.message;
+    }
+    return defaultMsg;
+  } catch {
+    return defaultMsg;
+  }
+};
+
 interface User {
   id: string;
   name: string;
   email: string | null;
   avatar: string;
   status: string;
+  accentColor?: string;
+  blurIntensity?: string;
+  clockFormat24h?: boolean;
 }
 
 interface Note {
@@ -83,16 +113,215 @@ interface Message {
   user: { id: string; name: string; avatar: string };
 }
 
+const WALLPAPERS = [
+  { id: 'yosemite', name: 'Yosemite Mountain', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80' },
+  { id: 'forest', name: 'Mystic Forest', url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1920&q=80' },
+  { id: 'cyberpunk', name: 'Neon Cyberpunk', url: 'https://images.unsplash.com/photo-1515621061946-eff1c2a352bd?auto=format&fit=crop&w=1920&q=80' },
+  { id: 'ocean', name: 'Tranquil Ocean', url: 'https://images.unsplash.com/photo-1505118380757-91f5f5632de0?auto=format&fit=crop&w=1920&q=80' },
+  { id: 'space', name: 'Nebula Space', url: 'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?auto=format&fit=crop&w=1920&q=80' }
+];
+
 function App() {
   // Navigation & UI state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'bookmarks' | 'notes' | 'tasks' | 'reminders'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'bookmarks' | 'notes' | 'tasks' | 'reminders' | 'chat' | 'customize'>('dashboard');
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Customize & Wallpaper states
+  const [currentWallpaper, setCurrentWallpaper] = useState(() => {
+    return localStorage.getItem('synctab-wallpaper') || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80';
+  });
+  const [wallpapers, setWallpapers] = useState<{ id: string; name: string; url: string; isCustom?: boolean }[]>(() => {
+    try {
+      const saved = localStorage.getItem('synctab-wallpapers-list');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return WALLPAPERS;
+  });
+  const [customGreeting, setCustomGreeting] = useState(() => {
+    return localStorage.getItem('synctab-custom-greeting') || '';
+  });
+  const [customWpName, setCustomWpName] = useState('');
+  const [customWpUrl, setCustomWpUrl] = useState('');
+
+  const [accentColor, setAccentColor] = useState(() => {
+    return localStorage.getItem('synctab-accent-color') || '#8b5cf6';
+  });
+  const [blurIntensity, setBlurIntensity] = useState(() => {
+    return localStorage.getItem('synctab-blur-intensity') || '20px';
+  });
+  const [clockFormat24h, setClockFormat24h] = useState(() => {
+    return localStorage.getItem('synctab-clock-format-24h') === 'true';
+  });
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  const [visibleTabs, setVisibleTabs] = useState(() => {
+    try {
+      const saved = localStorage.getItem('synctab-visible-tabs');
+      return saved ? JSON.parse(saved) : {
+        bookmarks: true,
+        notes: true,
+        tasks: true,
+        reminders: true,
+        chat: true
+      };
+    } catch {
+      return {
+        bookmarks: true,
+        notes: true,
+        tasks: true,
+        reminders: true,
+        chat: true
+      };
+    }
+  });
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleUploadWallpaper(file, customWpName.trim());
+      setCustomWpName('');
+    }
+  };
+
+  const handleAddCustomWallpaper = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customWpUrl.trim()) return;
+    const name = customWpName.trim() || `Custom Wallpaper ${wallpapers.length - 4}`;
+    const newWp = {
+      id: `custom-${Date.now()}`,
+      name,
+      url: customWpUrl.trim()
+    };
+    const updated = [...wallpapers, newWp];
+    setWallpapers(updated);
+    setCurrentWallpaper(newWp.url);
+    setCustomWpName('');
+    setCustomWpUrl('');
+  };
+
+  useEffect(() => {
+    localStorage.setItem('synctab-wallpapers-list', JSON.stringify(wallpapers));
+  }, [wallpapers]);
+
+  useEffect(() => {
+    localStorage.setItem('synctab-custom-greeting', customGreeting);
+  }, [customGreeting]);
+
+  useEffect(() => {
+    localStorage.setItem('synctab-visible-tabs', JSON.stringify(visibleTabs));
+  }, [visibleTabs]);
+
+  useEffect(() => {
+    document.body.style.backgroundImage = isDarkMode 
+      ? `linear-gradient(rgba(6, 7, 10, 0.4), rgba(6, 7, 10, 0.85)), url('${currentWallpaper}')`
+      : `linear-gradient(rgba(248, 250, 252, 0.65), rgba(248, 250, 252, 0.9)), url('${currentWallpaper}')`;
+    
+    localStorage.setItem('synctab-wallpaper', currentWallpaper);
+  }, [currentWallpaper, isDarkMode]);
+
+  useEffect(() => {
+    if (activeTab === 'bookmarks' && !visibleTabs.bookmarks) setActiveTab('dashboard');
+    if (activeTab === 'notes' && !visibleTabs.notes) setActiveTab('dashboard');
+    if (activeTab === 'tasks' && !visibleTabs.tasks) setActiveTab('dashboard');
+    if (activeTab === 'reminders' && !visibleTabs.reminders) setActiveTab('dashboard');
+    if (activeTab === 'chat' && !visibleTabs.chat) setActiveTab('dashboard');
+  }, [visibleTabs, activeTab]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--primary', accentColor);
+    let glow = 'rgba(139, 92, 246, 0.4)';
+    let hover = '#a78bfa';
+    if (accentColor === '#10b981') {
+      glow = 'rgba(16, 185, 129, 0.4)';
+      hover = '#34d399';
+    } else if (accentColor === '#3b82f6') {
+      glow = 'rgba(59, 130, 246, 0.4)';
+      hover = '#60a5fa';
+    } else if (accentColor === '#f97316') {
+      glow = 'rgba(249, 115, 22, 0.4)';
+      hover = '#fb923c';
+    } else if (accentColor === '#ec4899') {
+      glow = 'rgba(236, 72, 153, 0.4)';
+      hover = '#f472b6';
+    }
+    document.documentElement.style.setProperty('--primary-glow', glow);
+    document.documentElement.style.setProperty('--primary-hover', hover);
+    localStorage.setItem('synctab-accent-color', accentColor);
+  }, [accentColor]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--blur-amount', blurIntensity);
+    localStorage.setItem('synctab-blur-intensity', blurIntensity);
+  }, [blurIntensity]);
+
+  useEffect(() => {
+    localStorage.setItem('synctab-clock-format-24h', String(clockFormat24h));
+  }, [clockFormat24h]);
+
   // Database lists
   const [users, setUsers] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  const saveThemeSettings = async (updates: { accentColor?: string; blurIntensity?: string; clockFormat24h?: boolean }) => {
+    if (!currentUser || !isOnline) return;
+    try {
+      const res = await fetch(`${API_BASE}/users/${currentUser.id}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const updatedUser = await unpackJson(res);
+        const cached = localStorage.getItem('synctab_user');
+        if (cached) {
+          const cachedUser = JSON.parse(cached);
+          const newCached = { ...cachedUser, ...updates };
+          localStorage.setItem('synctab_user', JSON.stringify(newCached));
+        }
+        setCurrentUser(updatedUser);
+      }
+    } catch (e) {
+      console.error('Failed to sync theme settings with database:', e);
+    }
+  };
+
+  const handleUpdateAccentColor = (color: string) => {
+    setAccentColor(color);
+    localStorage.setItem('synctab-accent-color', color);
+    saveThemeSettings({ accentColor: color });
+  };
+
+  const handleUpdateBlurIntensity = (intensity: string) => {
+    setBlurIntensity(intensity);
+    localStorage.setItem('synctab-blur-intensity', intensity);
+    saveThemeSettings({ blurIntensity: intensity });
+  };
+
+  const handleUpdateClockFormat = (is24h: boolean) => {
+    setClockFormat24h(is24h);
+    localStorage.setItem('synctab-clock-format-24h', String(is24h));
+    saveThemeSettings({ clockFormat24h: is24h });
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.accentColor) {
+        setAccentColor(currentUser.accentColor);
+        localStorage.setItem('synctab-accent-color', currentUser.accentColor);
+      }
+      if (currentUser.blurIntensity) {
+        setBlurIntensity(currentUser.blurIntensity);
+        localStorage.setItem('synctab-blur-intensity', currentUser.blurIntensity);
+      }
+      if (currentUser.clockFormat24h !== undefined) {
+        setClockFormat24h(currentUser.clockFormat24h);
+        localStorage.setItem('synctab-clock-format-24h', String(currentUser.clockFormat24h));
+      }
+    }
+  }, [currentUser]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
@@ -130,21 +359,47 @@ function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isGoogleSimOpen, setIsGoogleSimOpen] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`, '_blank');
+  };
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Click outside profile dropdown handler
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
+        const trigger = document.querySelector('.widget-profile-btn');
+        if (trigger && trigger.contains(event.target as Node)) {
+          return;
+        }
+        setShowProfileDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Time ticker
   useEffect(() => {
     const updateTime = () => {
       const d = new Date();
-      setTimeStr(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setTimeStr(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: !clockFormat24h }));
       setDateStr(d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }));
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [clockFormat24h]);
 
   // Theme effect
   useEffect(() => {
@@ -254,6 +509,13 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
+  // Scroll chat to bottom when switching to chat tab
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      scrollToBottom();
+    }
+  }, [activeTab]);
+
   const scrollToBottom = () => {
     setTimeout(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -266,7 +528,7 @@ function App() {
       // 1. Fetch Users
       const resUsers = await fetch(`${API_BASE}/users`);
       if (!resUsers.ok) throw new Error('API server down');
-      const usersData: User[] = await resUsers.json();
+      const usersData: User[] = await unpackJson(resUsers);
       setUsers(usersData);
 
       // Restore user session from localStorage if exists
@@ -287,7 +549,8 @@ function App() {
           fetchNotes(activeUser),
           fetchBookmarks(activeUser),
           fetchTasks(),
-          fetchChatMessages()
+          fetchChatMessages(),
+          fetchCustomWallpapers(activeUser)
         ]);
       } else {
         setCurrentUser(null);
@@ -420,7 +683,7 @@ function App() {
     if (!user) return;
     try {
       const res = await fetch(`${API_BASE}/notes?userId=${user.id}`);
-      const data = await res.json();
+      const data = await unpackJson(res);
       setNotes(data);
       if (data.length > 0 && !selectedNote) {
         setSelectedNote(data[0]);
@@ -432,7 +695,7 @@ function App() {
     if (!user) return;
     try {
       const res = await fetch(`${API_BASE}/bookmarks?userId=${user.id}`);
-      const data = await res.json();
+      const data = await unpackJson(res);
       setBookmarks(data);
     } catch (e) { console.error(e); }
   };
@@ -440,7 +703,7 @@ function App() {
   const fetchTasks = async () => {
     try {
       const res = await fetch(`${API_BASE}/tasks`);
-      const data = await res.json();
+      const data = await unpackJson(res);
       setTasks(data);
     } catch (e) { console.error(e); }
   };
@@ -449,7 +712,7 @@ function App() {
     if (!currentUser) return;
     try {
       const res = await fetch(`${API_BASE}/reminders?userId=${currentUser.id}`);
-      const data = await res.json();
+      const data = await unpackJson(res);
       setReminders(data);
     } catch (e) { console.error(e); }
   };
@@ -457,10 +720,97 @@ function App() {
   const fetchChatMessages = async () => {
     try {
       const res = await fetch(`${API_BASE}/messages`);
-      const data = await res.json();
+      const data = await unpackJson(res);
       setMessages(data);
       scrollToBottom();
     } catch (e) { console.error(e); }
+  };
+
+  const fetchCustomWallpapers = async (user = currentUser) => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${API_BASE}/wallpapers?userId=${user.id}`);
+      if (res.ok) {
+        const data = await unpackJson(res);
+        const dbWallpapers = data.map((w: any) => ({
+          id: w.id,
+          name: w.name,
+          url: w.url,
+          isCustom: true
+        }));
+        setWallpapers([...WALLPAPERS, ...dbWallpapers]);
+      }
+    } catch (e) {
+      console.error('Error fetching custom wallpapers:', e);
+    }
+  };
+
+  const handleUploadWallpaper = async (file: File, name: string) => {
+    if (!currentUser) return;
+    setIsUploading(true);
+    setUploadError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('name', name || file.name.split('.')[0] || 'Uploaded Wallpaper');
+      formData.append('userId', currentUser.id);
+
+      const res = await fetch(`${API_BASE}/wallpapers/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const newWp = await unpackJson(res);
+      const updatedWp = {
+        id: newWp.id,
+        name: newWp.name,
+        url: newWp.url,
+        isCustom: true
+      };
+
+      setWallpapers((prev) => [...prev, updatedWp]);
+      setCurrentWallpaper(newWp.url);
+    } catch (err: any) {
+      console.error(err);
+      setUploadError('Failed to upload image. Using local offline fallback.');
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const localUrl = reader.result as string;
+        const fallbackWp = {
+          id: `local-fallback-${Date.now()}`,
+          name: name || file.name.split('.')[0] || 'Uploaded Wallpaper (Local)',
+          url: localUrl,
+          isCustom: true
+        };
+        setWallpapers((prev) => [...prev, fallbackWp]);
+        setCurrentWallpaper(localUrl);
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteCustomWallpaper = async (wpId: string, wpUrl: string) => {
+    try {
+      if (!wpId.startsWith('local-fallback-')) {
+        await fetch(`${API_BASE}/wallpapers/${wpId}`, { method: 'DELETE' });
+      }
+    } catch (e) {
+      console.error('Failed to delete wallpaper from DB:', e);
+    }
+
+    const updated = wallpapers.filter((w) => w.id !== wpId);
+    setWallpapers(updated);
+
+    if (currentWallpaper === wpUrl) {
+      setCurrentWallpaper(WALLPAPERS[0].url);
+    }
   };
 
   // ==================== AUTHENTICATION HANDLERS ====================
@@ -492,11 +842,11 @@ function App() {
       });
       
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || 'Invalid email or password');
+        const errMsg = await unpackError(res, 'Invalid email or password');
+        throw new Error(errMsg);
       }
 
-      const userData = await res.json();
+      const userData = await unpackJson(res);
       localStorage.setItem('synctab_user', JSON.stringify(userData));
       setCurrentUser(userData);
       
@@ -505,7 +855,8 @@ function App() {
         fetchNotes(userData),
         fetchBookmarks(userData),
         fetchTasks(),
-        fetchChatMessages()
+        fetchChatMessages(),
+        fetchCustomWallpapers(userData)
       ]);
     } catch (err: unknown) {
       console.error(err);
@@ -537,25 +888,26 @@ function App() {
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || 'Registration failed');
+        const errMsg = await unpackError(res, 'Registration failed');
+        throw new Error(errMsg);
       }
 
-      const userData = await res.json();
+      const userData = await unpackJson(res);
       localStorage.setItem('synctab_user', JSON.stringify(userData));
       setCurrentUser(userData);
 
       // Refresh users list
       const resUsers = await fetch(`${API_BASE}/users`);
       if (resUsers.ok) {
-        setUsers(await resUsers.json());
+        setUsers(await unpackJson(resUsers));
       }
       
       await Promise.all([
         fetchNotes(userData),
         fetchBookmarks(userData),
         fetchTasks(),
-        fetchChatMessages()
+        fetchChatMessages(),
+        fetchCustomWallpapers(userData)
       ]);
     } catch (err: unknown) {
       console.error(err);
@@ -604,7 +956,7 @@ function App() {
           // Refresh users list
           const resUsers = await fetch(`${API_BASE}/users`);
           if (resUsers.ok) {
-            setUsers(await resUsers.json());
+            setUsers(await unpackJson(resUsers));
           }
 
           // Fetch app data for the logged in user
@@ -612,7 +964,8 @@ function App() {
             fetchNotes(userData),
             fetchBookmarks(userData),
             fetchTasks(),
-            fetchChatMessages()
+            fetchChatMessages(),
+            fetchCustomWallpapers(userData)
           ]);
         } catch (err) {
           console.error(err);
@@ -669,25 +1022,26 @@ function App() {
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.message || 'Google login failed');
+        const errMsg = await unpackError(res, 'Google login failed');
+        throw new Error(errMsg);
       }
 
-      const userData = await res.json();
+      const userData = await unpackJson(res);
       localStorage.setItem('synctab_user', JSON.stringify(userData));
       setCurrentUser(userData);
 
       // Refresh users list
       const resUsers = await fetch(`${API_BASE}/users`);
       if (resUsers.ok) {
-        setUsers(await resUsers.json());
+        setUsers(await unpackJson(resUsers));
       }
 
       await Promise.all([
-        fetchNotes(),
-        fetchBookmarks(),
+        fetchNotes(userData),
+        fetchBookmarks(userData),
         fetchTasks(),
-        fetchChatMessages()
+        fetchChatMessages(),
+        fetchCustomWallpapers(userData)
       ]);
     } catch (err: unknown) {
       console.error(err);
@@ -841,7 +1195,7 @@ function App() {
         })
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = await unpackJson(res);
         setNotes((prev) => [data, ...prev]);
         setSelectedNote(data);
       }
@@ -1335,160 +1689,330 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* 1. Sidebar Nav */}
-      <aside className="sidebar">
-        <div className="brand-section">
-          <div className="logo-icon">
-            <BookmarkIcon size={20} />
+      {/* Left Edge Navigation */}
+      <div className="edge-menu left-side">
+        <div className="edge-menu-item-wrapper">
+          <button
+            onClick={() => setActiveTab('dashboard')}
+            className={`edge-menu-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+          >
+            <Globe size={20} />
+          </button>
+          <span className="edge-menu-label">Home</span>
+        </div>
+        {visibleTabs.bookmarks && (
+          <div className="edge-menu-item-wrapper">
+            <button
+              onClick={() => setActiveTab('bookmarks')}
+              className={`edge-menu-btn ${activeTab === 'bookmarks' ? 'active' : ''}`}
+            >
+              <BookmarkIcon size={20} />
+            </button>
+            <span className="edge-menu-label">Bookmarks</span>
           </div>
-          <span className="brand-name">SyncTab</span>
+        )}
+        {visibleTabs.notes && (
+          <div className="edge-menu-item-wrapper">
+            <button
+              onClick={() => setActiveTab('notes')}
+              className={`edge-menu-btn ${activeTab === 'notes' ? 'active' : ''}`}
+            >
+              <FileText size={20} />
+            </button>
+            <span className="edge-menu-label">Notes</span>
+          </div>
+        )}
+        {/* Customize Menu Item */}
+        <div className="edge-menu-item-wrapper">
+          <button
+            onClick={() => setActiveTab('customize')}
+            className={`edge-menu-btn ${activeTab === 'customize' ? 'active' : ''}`}
+            title="Customize Dashboard"
+          >
+            <Sliders size={20} />
+          </button>
+          <span className="edge-menu-label">Customize</span>
+        </div>
+      </div>
+
+      {/* Right Edge Navigation */}
+      <div className="edge-menu right-side">
+        {visibleTabs.tasks && (
+          <div className="edge-menu-item-wrapper">
+            <button
+              onClick={() => setActiveTab('tasks')}
+              className={`edge-menu-btn ${activeTab === 'tasks' ? 'active' : ''}`}
+            >
+              <CheckSquare size={20} />
+            </button>
+            <span className="edge-menu-label">Tasks</span>
+          </div>
+        )}
+        {visibleTabs.reminders && (
+          <div className="edge-menu-item-wrapper">
+            <button
+              onClick={() => setActiveTab('reminders')}
+              className={`edge-menu-btn ${activeTab === 'reminders' ? 'active' : ''}`}
+            >
+              <Clock size={20} />
+            </button>
+            <span className="edge-menu-label">Reminders</span>
+          </div>
+        )}
+        {visibleTabs.chat && (
+          <div className="edge-menu-item-wrapper">
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`edge-menu-btn ${activeTab === 'chat' ? 'active' : ''}`}
+            >
+              <MessageSquare size={20} />
+            </button>
+            <span className="edge-menu-label">Chat</span>
+          </div>
+        )}
+      </div>
+
+      {/* Main content area */}
+      <main className="main-content">
+        {/* Top Right Quick Widgets */}
+        <div className="top-right-widgets">
+          {/* Theme Toggle Button */}
+          <button className="widget-circle-btn" onClick={() => setIsDarkMode(!isDarkMode)}>
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+
+          {/* User Profile Avatar with dropdown trigger */}
+          {currentUser && (
+            <button className="widget-circle-btn widget-profile-btn" onClick={() => setShowProfileDropdown(!showProfileDropdown)}>
+              <div className={`widget-avatar ${currentUser.avatar}`}>
+                {currentUser.name.charAt(0).toUpperCase()}
+                <span className={`widget-status-dot ${currentUser.status.toLowerCase().replace(' ', '')}`} />
+              </div>
+            </button>
+          )}
         </div>
 
-        {/* User Simulation Selector */}
-        {currentUser && (
-          <div className="user-selector-card glass-panel">
-            <div className="user-profile-info">
-              <div className={`avatar-circle ${currentUser.avatar}`}>
-                {currentUser.name.charAt(0)}
-                <span className={`status-dot ${currentUser.status.toLowerCase().replace(' ', '')}`} />
+        {/* Profile Settings Dropdown popover - Google Apps Launcher style */}
+        {showProfileDropdown && currentUser && (
+          <div className="profile-dropdown" ref={profileDropdownRef}>
+            <div className="profile-dropdown-header">
+              <span className="profile-dropdown-title">Google Apps</span>
+              <button className="profile-dropdown-edit-btn" title="Google Settings" onClick={() => {
+                window.open('https://myaccount.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <Edit2 size={14} />
+              </button>
+            </div>
+
+            <div className="profile-launcher-grid">
+              {/* Account */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://myaccount.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className={`launcher-icon-circle ${currentUser.avatar}`}>
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="launcher-label">Account</span>
               </div>
-              <div>
-                <h4 style={{ fontSize: '13px', fontWeight: 700 }}>{currentUser.name}</h4>
-                <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Teammate</p>
+
+              {/* Gmail */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://mail.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Gmail</span>
+              </div>
+
+              {/* Search */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://www.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Search" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Search</span>
+              </div>
+
+              {/* Maps */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://maps.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Google_Maps_icon_%282020%29.svg" alt="Maps" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Maps</span>
+              </div>
+
+              {/* Contacts */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://contacts.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/9/93/Google_Contacts_icon_%282020%29.svg" alt="Contacts" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Contacts</span>
+              </div>
+
+              {/* Calendar */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://calendar.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Calendar" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Calendar</span>
+              </div>
+
+              {/* Drive */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://drive.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" alt="Drive" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Drive</span>
+              </div>
+
+              {/* Translate */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://translate.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/d/d7/Google_Translate_logo.svg" alt="Translate" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Translate</span>
+              </div>
+
+              {/* Photos */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://photos.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Photos_icon_%282020%29.svg" alt="Photos" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Photos</span>
+              </div>
+
+              {/* Gemini */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://gemini.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" alt="Gemini" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Gemini</span>
+              </div>
+
+              {/* News */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://news.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/d/da/Google_News_icon_%282020%29.svg" alt="News" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">News</span>
+              </div>
+
+              {/* Meet */}
+              <div className="launcher-item" onClick={() => {
+                window.open('https://meet.google.com', '_blank', 'noopener,noreferrer');
+                setShowProfileDropdown(false);
+              }}>
+                <div className="launcher-icon-circle bg-dark-glass">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/9/9b/Google_Meet_icon_%282020%29.svg" alt="Meet" className="launcher-icon-img" />
+                </div>
+                <span className="launcher-label">Meet</span>
               </div>
             </div>
 
-            {/* Quick Status picker */}
-            <div className="presence-picker">
-              {['Active', 'Away', 'Meeting', 'Busy'].map((st) => (
+            {/* Ssleek drawer for SyncTab Account Status & Sign Out */}
+            <div className="profile-dropdown-footer" style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              paddingTop: '12px',
+              marginTop: '4px'
+            }}>
+              {/* Status Selector */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {['Active', 'Away', 'Meeting', 'Busy'].map((st) => {
+                    const dotClass = st.toLowerCase();
+                    const isSelected = currentUser.status.toLowerCase().includes(st.toLowerCase());
+                    return (
+                      <button
+                        key={st}
+                        onClick={() => {
+                          handleStatusChange(st);
+                          setShowProfileDropdown(false);
+                        }}
+                        title={st}
+                        style={{
+                          background: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                          border: isSelected ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid transparent',
+                          borderRadius: '50%',
+                          width: '24px',
+                          height: '24px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          padding: 0
+                        }}
+                      >
+                        <span className={`status-dot ${dotClass}`} style={{ position: 'relative', border: 'none', bottom: 'auto', right: 'auto', transform: 'scale(1.2)' }} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Sign Out & User Info */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>{currentUser.name}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentUser.email || 'Offline Session'}</span>
+                </div>
                 <button
-                  key={st}
-                  onClick={() => handleStatusChange(st)}
-                  className={`presence-btn ${currentUser.status.toLowerCase().includes(st.toLowerCase()) ? 'selected' : ''}`}
+                  onClick={() => { handleLogout(); setShowProfileDropdown(false); }}
+                  style={{
+                    background: 'rgba(244, 63, 94, 0.1)',
+                    border: '1px solid rgba(244, 63, 94, 0.2)',
+                    borderRadius: '20px',
+                    padding: '6px 12px',
+                    color: 'var(--color-meeting)',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s'
+                  }}
                 >
-                  {st}
+                  <LogOut size={12} />
+                  <span>Sign Out</span>
                 </button>
-              ))}
-            </div>
-            <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '8px' }}>
-              <button
-                onClick={handleLogout}
-                className="btn-signout"
-                style={{
-                  width: '100%',
-                  fontSize: '12px',
-                  padding: '6px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(244, 63, 94, 0.2)',
-                  background: 'rgba(244, 63, 94, 0.08)',
-                  color: 'var(--color-meeting)',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  transition: 'all 0.2s'
-                }}
-              >
-                Sign Out
-              </button>
+              </div>
             </div>
           </div>
         )}
-
-        {/* Navigation links */}
-        <nav className="sidebar-nav">
-          <button onClick={() => setActiveTab('dashboard')} className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}>
-            <Globe size={16} /> Dashboard
-          </button>
-          <button onClick={() => setActiveTab('bookmarks')} className={`nav-item ${activeTab === 'bookmarks' ? 'active' : ''}`}>
-            <BookmarkIcon size={16} /> Custom Bookmarks
-          </button>
-          <button onClick={() => setActiveTab('notes')} className={`nav-item ${activeTab === 'notes' ? 'active' : ''}`}>
-            <FileText size={16} /> Shared & Personal Notes
-          </button>
-          <button onClick={() => setActiveTab('tasks')} className={`nav-item ${activeTab === 'tasks' ? 'active' : ''}`}>
-            <CheckSquare size={16} /> Issue / Task Kanban
-          </button>
-          <button onClick={() => setActiveTab('reminders')} className={`nav-item ${activeTab === 'reminders' ? 'active' : ''}`}>
-            <Clock size={16} /> Quick Reminders
-          </button>
-        </nav>
-
-        {/* Live Chat Panel in Sidebar */}
-        <div className="sidebar-chat">
-          <div className="chat-header">
-            <span style={{ fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <MessageSquare size={14} color="var(--primary)" /> Team Workspace Chat
-            </span>
-          </div>
-
-          <div className="chat-messages">
-            {messages.map((msg) => (
-              <div key={msg.id} className="chat-bubble">
-                <div className="chat-user">
-                  <span>{msg.user?.name || 'Teammate'}</span>
-                  <span className="chat-time">
-                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <div>{msg.text}</div>
-              </div>
-            ))}
-            <div ref={chatEndRef} />
-          </div>
-
-          <form onSubmit={handleSendChatMessage} className="chat-input-wrapper">
-            <input
-              type="text"
-              className="chat-input"
-              placeholder="Post an update..."
-              value={chatMessage}
-              onChange={(e) => setChatMessage(e.target.value)}
-            />
-            <button type="submit" className="chat-send-btn">
-              <ChevronRight size={14} />
-            </button>
-          </form>
-        </div>
-      </aside>
-
-      {/* 2. Main Dashboard Panel */}
-      <main className="main-content">
-        {/* Top Header widgets */}
-        <header className="dashboard-header">
-          <div>
-            <span style={{
-              fontSize: '11px',
-              padding: '4px 10px',
-              borderRadius: '20px',
-              fontWeight: 600,
-              background: isOnline ? 'rgba(16, 185, 129, 0.12)' : 'rgba(244, 63, 94, 0.12)',
-              color: isOnline ? 'var(--color-active)' : 'var(--color-meeting)',
-              border: `1px solid ${isOnline ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)'}`,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              marginBottom: '10px'
-            }}>
-              <span className={`status-dot ${isOnline ? 'active' : 'meeting'}`} style={{ position: 'relative', border: 'none' }} />
-              {isOnline ? 'Real-time Connected' : 'Offline Mode (Local Sim)'}
-            </span>
-            <h1 style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '-0.7px' }}>
-              Welcome back, {currentUser?.name || 'Worker'}
-            </h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
-              Simplify your office workflow. Share tasks, bookmarks, and coordinate effortlessly.
-            </p>
-          </div>
-
-          <div className="time-widget">
-            <div className="time-display">{timeStr}</div>
-            <div className="date-display">{dateStr}</div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
-              <button className="btn-icon-only" onClick={() => setIsDarkMode(!isDarkMode)}>
-                {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
-              </button>
-            </div>
-          </div>
-        </header>
 
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
@@ -1498,166 +2022,46 @@ function App() {
           <>
             {/* Navigated Tabs */}
             
-            {/* A. DASHBOARD VIEW (All modules summarized in widget grid) */}
+            {/* A. DASHBOARD VIEW (Home view with Circle and Search) */}
             {activeTab === 'dashboard' && (
-              <div className="widgets-grid">
-                
-                {/* 1. Bookmark Widget (Summarized) */}
-                <div className="widget-container glass-panel widget-span-8">
-                  <div className="widget-header-row">
-                    <h3 className="widget-title">
-                      <BookmarkIcon size={18} color="var(--primary)" /> Quick Launch Bookmarks
-                    </h3>
-                    <button className="btn-primary" onClick={() => setIsBookmarkModalOpen(true)}>
-                      <Plus size={14} /> Add New
-                    </button>
-                  </div>
-
-                  <div className="bookmarks-container">
-                    <div className="bookmarks-grid">
-                      {bookmarks.slice(0, 8).map((bookmark) => (
-                        <div
-                          key={bookmark.id}
-                          className="bookmark-card"
-                          onClick={() => handleBookmarkClick(bookmark)}
-                        >
-                          {bookmark.isShared && <span className="bookmark-shared-tag">Shared</span>}
-                          <button
-                            className="bookmark-delete-btn"
-                            onClick={(e) => handleDeleteBookmark(bookmark.id, e)}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                          <div className="bookmark-icon-box">
-                            {bookmark.title.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="bookmark-title">{bookmark.title}</div>
-                          <div className="bookmark-clicks">{bookmark.clicks} clicks</div>
-                        </div>
-                      ))}
-                      {bookmarks.length === 0 && (
-                        <div className="empty-state widget-span-12">
-                          <span className="empty-state-icon">🌟</span>
-                          <span>No bookmarks saved yet. Customise your dashboard.</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. Team Directory / Status Widget */}
-                <div className="widget-container glass-panel widget-span-4">
-                  <h3 className="widget-title">
-                    <Users size={18} color="var(--secondary)" /> Teammates Status
-                  </h3>
-                  <div className="teammates-grid">
-                    {users.map((u) => (
-                      <div key={u.id} className="teammate-row">
-                        <div className="teammate-info">
-                          <div className={`avatar-circle ${u.avatar}`} style={{ width: '32px', height: '32px', fontSize: '13px' }}>
-                            {u.name.charAt(0)}
-                          </div>
-                          <div>
-                            <div className="teammate-name">{u.name}</div>
-                            <div className="teammate-status-label">{u.email || 'Workspace user'}</div>
-                          </div>
-                        </div>
-                        <span className={`teammate-presence-badge ${u.status.toLowerCase().replace(' ', '')}`}>
-                          {u.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 3. Notes Widget (Quick access) */}
-                <div className="widget-container glass-panel widget-span-6">
-                  <div className="widget-header-row">
-                    <h3 className="widget-title">
-                      <FileText size={18} color="var(--primary)" /> Shared Team Notes
-                    </h3>
-                    <button className="btn-secondary" onClick={() => { setActiveTab('notes'); handleCreateNote(); }}>
-                      <Plus size={14} /> New Note
-                    </button>
-                  </div>
-                  <div className="notes-list" style={{ maxHeight: '250px' }}>
-                    {notes.filter(n => n.isShared).slice(0, 4).map((note) => (
-                      <div
-                        key={note.id}
-                        className="note-item"
-                        onClick={() => { setSelectedNote(note); setActiveTab('notes'); }}
-                      >
-                        <div className="note-item-title">{note.title}</div>
-                        <div className="note-item-meta">
-                          <span>Updated by {note.user?.name || 'Teammate'}</span>
-                          <span className="note-shared-badge">Shared</span>
-                        </div>
-                      </div>
-                    ))}
-                    {notes.filter(n => n.isShared).length === 0 && (
-                      <div className="empty-state">
-                        <span>No shared notes yet. Share a note to coordinate designs.</span>
-                      </div>
+              <div className="home-page-container">
+                {/* Glowing Circle Widget */}
+                <div className="circle-widget">
+                  <div className="circle-time" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '4px' }}>
+                    <span>{timeStr.slice(0, 5)}</span>
+                    {!clockFormat24h && timeStr.split(' ')[1] && (
+                      <span style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', opacity: 0.8, color: 'var(--primary)', letterSpacing: '0.5px' }}>
+                        {timeStr.split(' ')[1]}
+                      </span>
                     )}
                   </div>
-                </div>
-
-                {/* 4. Reminders Widget (Personal) */}
-                <div className="widget-container glass-panel widget-span-6">
-                  <h3 className="widget-title">
-                    <Clock size={18} color="var(--secondary)" /> My Reminders
-                  </h3>
-                  
-                  <form onSubmit={handleCreateReminder} style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="Add reminders (e.g. Timesheet review)"
-                      value={newReminderText}
-                      onChange={(e) => setNewReminderText(e.target.value)}
-                    />
-                    <input
-                      type="datetime-local"
-                      className="form-input"
-                      style={{ maxWidth: '160px' }}
-                      value={newReminderTime}
-                      onChange={(e) => setNewReminderTime(e.target.value)}
-                    />
-                    <button type="submit" className="btn-primary">Add</button>
-                  </form>
-
-                  <div className="reminders-list">
-                    {reminders.map((rem) => (
-                      <div key={rem.id} className="reminder-item">
-                        <div className="reminder-content">
-                          <button
-                            className={`reminder-checkbox ${rem.isCompleted ? 'checked' : ''}`}
-                            onClick={() => handleToggleReminder(rem.id)}
-                          >
-                            {rem.isCompleted && <Check size={12} />}
-                          </button>
-                          <div>
-                            <div className={`reminder-text ${rem.isCompleted ? 'completed' : ''}`}>
-                              {rem.text}
-                            </div>
-                            <div className="reminder-date">
-                              {new Date(rem.dueDate).toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                        <button className="reminder-delete-btn" onClick={() => handleDeleteReminder(rem.id)}>
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ))}
-                    {reminders.length === 0 && (
-                      <div className="empty-state">
-                        <span>No upcoming reminders for your workspace.</span>
-                      </div>
-                    )}
+                  <div className="circle-greeting">
+                    {customGreeting || (() => {
+                      const hour = new Date().getHours();
+                      const name = currentUser?.name.split(' ')[0] || 'User';
+                      if (hour < 12) return `Good morning, ${name}`;
+                      if (hour < 18) return `Good afternoon, ${name}`;
+                      return `Good evening, ${name}`;
+                    })()}
+                  </div>
+                  <div className="circle-date" style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', opacity: 0.8 }}>
+                    {dateStr}
                   </div>
                 </div>
 
+                {/* Sleek Search Bar */}
+                <form onSubmit={handleSearchSubmit} className="search-bar-container">
+                  <input
+                    type="text"
+                    className="search-input"
+                    placeholder="Search Google..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  <button type="submit" className="search-btn">
+                    <Search size={18} />
+                  </button>
+                </form>
               </div>
             )}
 
@@ -1967,7 +2371,7 @@ function App() {
 
             {/* E. DETAILED REMINDERS VIEW */}
             {activeTab === 'reminders' && (
-              <div className="widget-container glass-panel" style={{ maxWidth: '680px', margin: '0 auto', width: '100%' }}>
+              <div className="widget-container glass-panel">
                 <div>
                   <h3 className="widget-title"><Clock size={20} color="var(--primary)" /> Task Reminders</h3>
                   <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
@@ -2000,7 +2404,7 @@ function App() {
                   </button>
                 </form>
 
-                <div className="reminders-list" style={{ marginTop: '20px', maxHeight: 'none' }}>
+                <div className="reminders-list" style={{ marginTop: '20px' }}>
                   {reminders.map((rem) => (
                     <div key={rem.id} className="reminder-item">
                       <div className="reminder-content">
@@ -2030,6 +2434,491 @@ function App() {
                       <span>No reminders scheduled for this profile.</span>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* F. DETAILED CHAT VIEW */}
+            {activeTab === 'chat' && (
+              <div className="chat-page-container">
+                <div className="chat-channel-sidebar">
+                  <h3 style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-0.3px', margin: '4px 0 10px 0' }}>Workspace Channels</h3>
+                  <div className="chat-channel-list">
+                    <button className="chat-channel-item active">
+                      # general-workspace
+                    </button>
+                    <button className="chat-channel-item" disabled style={{ opacity: 0.6, cursor: 'not-allowed' }}>
+                      # announcements
+                    </button>
+                    <button className="chat-channel-item" disabled style={{ opacity: 0.6, cursor: 'not-allowed' }}>
+                      # links-sharing
+                    </button>
+                  </div>
+                </div>
+
+                <div className="chat-main-area">
+                  <div className="chat-main-header">
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: 800 }}># general-workspace</span>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Welcome to the team coordination channel</p>
+                    </div>
+                  </div>
+
+                  <div className="chat-messages-container">
+                    {messages.map((msg) => (
+                      <div key={msg.id} className="chat-msg-row">
+                        <div className={`chat-msg-avatar ${msg.user?.avatar || 'avatar-1'}`}>
+                          {msg.user?.name ? msg.user.name.charAt(0).toUpperCase() : 'U'}
+                        </div>
+                        <div className="chat-msg-content-box">
+                          <div className="chat-msg-meta">
+                            <span className="chat-msg-sender">{msg.user?.name || 'Teammate'}</span>
+                            <span className="chat-msg-time">
+                              {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className="chat-msg-text">{msg.text}</div>
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  <form onSubmit={handleSendChatMessage} className="chat-page-input-wrapper">
+                    <input
+                      type="text"
+                      className="chat-page-input"
+                      placeholder="Send a message to #general-workspace..."
+                      value={chatMessage}
+                      onChange={(e) => setChatMessage(e.target.value)}
+                    />
+                    <button type="submit" className="chat-page-send-btn">
+                      Send <ChevronRight size={16} />
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* G. DETAILED CUSTOMIZE VIEW */}
+            {activeTab === 'customize' && (
+              <div className="widget-container glass-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div className="widget-header-row">
+                  <div>
+                    <h3 className="widget-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Sliders size={20} color="var(--primary)" /> Customize Dashboard
+                    </h3>
+                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                      Elevate your space with premium custom aesthetics, themes, backgrounds, and layout widgets.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="customize-main-content" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px', marginTop: '16px' }}>
+                  
+                  {/* Left Column: Aesthetics, Layout & Clock Settings */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    
+                    {/* Theme & Brand Styling Card */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Palette size={14} color="var(--primary)" /> Theme & Aesthetics
+                      </h4>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                        Choose theme mode, brand accent highlight, and backdrop glass blur intensity.
+                      </p>
+
+                      {/* Theme Mode Option */}
+                      <div style={{ marginBottom: '14px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Interface Theme</span>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                          <button
+                            onClick={() => setIsDarkMode(false)}
+                            style={{
+                              flex: 1,
+                              padding: '8px',
+                              borderRadius: '8px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              border: !isDarkMode ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
+                              background: !isDarkMode ? 'var(--primary-glow)' : 'rgba(255,255,255,0.02)',
+                              color: !isDarkMode ? 'var(--text-primary)' : 'var(--text-secondary)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <Sun size={12} /> Light Theme
+                          </button>
+                          <button
+                            onClick={() => setIsDarkMode(true)}
+                            style={{
+                              flex: 1,
+                              padding: '8px',
+                              borderRadius: '8px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              border: isDarkMode ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
+                              background: isDarkMode ? 'var(--primary-glow)' : 'rgba(255,255,255,0.02)',
+                              color: isDarkMode ? 'var(--text-primary)' : 'var(--text-secondary)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <Moon size={12} /> Dark Theme
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Accent Color Highlight */}
+                      <div style={{ marginBottom: '14px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Brand Accent Color</span>
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                          {[
+                            { name: 'Violet', value: '#8b5cf6' },
+                            { name: 'Emerald', value: '#10b981' },
+                            { name: 'Blue', value: '#3b82f6' },
+                            { name: 'Orange', value: '#f97316' },
+                            { name: 'Rose', value: '#ec4899' }
+                          ].map((color) => {
+                            const isSelected = accentColor === color.value;
+                            return (
+                              <button
+                                key={color.value}
+                                onClick={() => handleUpdateAccentColor(color.value)}
+                                title={color.name}
+                                style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '50%',
+                                  backgroundColor: color.value,
+                                  border: isSelected ? '2.5px solid #fff' : '1.5px solid rgba(255,255,255,0.2)',
+                                  boxShadow: isSelected ? `0 0 12px ${color.value}` : 'none',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
+                                  transform: isSelected ? 'scale(1.15)' : 'scale(1)'
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Glass Blur Intensity */}
+                      <div>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Glass Blur Intensity</span>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                          {[
+                            { label: 'Low', value: '8px' },
+                            { label: 'Medium', value: '20px' },
+                            { label: 'High', value: '40px' }
+                          ].map((blur) => {
+                            const isSelected = blurIntensity === blur.value;
+                            return (
+                              <button
+                                key={blur.value}
+                                onClick={() => handleUpdateBlurIntensity(blur.value)}
+                                style={{
+                                  flex: 1,
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  border: isSelected ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
+                                  background: isSelected ? 'var(--primary-glow)' : 'rgba(255,255,255,0.02)',
+                                  color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                  transition: 'all 0.2s'
+                                }}
+                              >
+                                {blur.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Clock & Greeting Settings Card */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Clock size={14} color="var(--primary)" /> Clock & Greeting Customizer
+                      </h4>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                        Customize hour format and glowing clock center display greeting text.
+                      </p>
+
+                      {/* Clock Format */}
+                      <div style={{ marginBottom: '14px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Time Format</span>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                          {[
+                            { label: '12-Hour (AM/PM)', value: false },
+                            { label: '24-Hour (Military)', value: true }
+                          ].map((fmt) => {
+                            const isSelected = clockFormat24h === fmt.value;
+                            return (
+                              <button
+                                key={String(fmt.value)}
+                                onClick={() => handleUpdateClockFormat(fmt.value)}
+                                style={{
+                                  flex: 1,
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  border: isSelected ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
+                                  background: isSelected ? 'var(--primary-glow)' : 'rgba(255,255,255,0.02)',
+                                  color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                  transition: 'all 0.2s'
+                                }}
+                              >
+                                {fmt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Custom Greeting Text */}
+                      <div>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Greeting Text Override</span>
+                        <div className="form-group" style={{ marginBottom: 0, marginTop: '6px' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="e.g. Welcome Home, Md"
+                            value={customGreeting}
+                            onChange={(e) => setCustomGreeting(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Configure Menu Items Card */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Layout size={14} color="var(--primary)" /> Configure Edge Menus
+                      </h4>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                        Toggle visibility of vertical navigation items placed at screen boundaries.
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                        <label className="form-checkbox-row" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--panel-border)', borderRadius: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={visibleTabs.bookmarks}
+                            onChange={(e) => setVisibleTabs({ ...visibleTabs, bookmarks: e.target.checked })}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px', accentColor: 'var(--primary)' }}
+                          />
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <BookmarkIcon size={12} /> Bookmarks
+                          </span>
+                        </label>
+                        <label className="form-checkbox-row" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--panel-border)', borderRadius: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={visibleTabs.notes}
+                            onChange={(e) => setVisibleTabs({ ...visibleTabs, notes: e.target.checked })}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px', accentColor: 'var(--primary)' }}
+                          />
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <FileText size={12} /> Notes
+                          </span>
+                        </label>
+                        <label className="form-checkbox-row" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--panel-border)', borderRadius: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={visibleTabs.tasks}
+                            onChange={(e) => setVisibleTabs({ ...visibleTabs, tasks: e.target.checked })}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px', accentColor: 'var(--primary)' }}
+                          />
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <CheckSquare size={12} /> Tasks
+                          </span>
+                        </label>
+                        <label className="form-checkbox-row" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--panel-border)', borderRadius: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={visibleTabs.reminders}
+                            onChange={(e) => setVisibleTabs({ ...visibleTabs, reminders: e.target.checked })}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px', accentColor: 'var(--primary)' }}
+                          />
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Clock size={12} /> Reminders
+                          </span>
+                        </label>
+                        <label className="form-checkbox-row" style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--panel-border)', borderRadius: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={visibleTabs.chat}
+                            onChange={(e) => setVisibleTabs({ ...visibleTabs, chat: e.target.checked })}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px', accentColor: 'var(--primary)' }}
+                          />
+                          <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <MessageSquare size={12} /> Live Chat
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Right Column: Wallpaper Management & Cloudinary Image Uploads */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    
+                    {/* Background Wallpapers Grid */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <ImageIcon size={14} color="var(--primary)" /> Select Background Wallpaper
+                      </h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
+                        {wallpapers.map((wp) => {
+                          const isSelected = currentWallpaper === wp.url;
+                          const isCustom = !!wp.isCustom;
+                          return (
+                            <div key={wp.id} style={{ position: 'relative', height: '64px', borderRadius: '8px', overflow: 'hidden' }}>
+                              <button
+                                type="button"
+                                onClick={() => setCurrentWallpaper(wp.url)}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  border: isSelected ? '2px solid var(--primary)' : '1px solid var(--panel-border)',
+                                  background: `linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.35)), url('${wp.url}')`,
+                                  backgroundSize: 'cover',
+                                  backgroundPosition: 'center',
+                                  color: '#fff',
+                                  fontSize: '10px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.2s',
+                                  boxShadow: isSelected ? '0 0 10px var(--primary-glow)' : 'none'
+                                }}
+                              >
+                                {wp.name}
+                              </button>
+                              {isCustom && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCustomWallpaper(wp.id, wp.url)}
+                                  title="Delete Custom Wallpaper"
+                                  style={{
+                                    position: 'absolute',
+                                    top: '4px',
+                                    right: '4px',
+                                    background: 'rgba(239, 68, 68, 0.9)',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    width: '18px',
+                                    height: '18px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#fff',
+                                    cursor: 'pointer',
+                                    zIndex: 2,
+                                    transition: 'opacity 0.2s'
+                                  }}
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Premium Image Uploader via Cloudinary */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <UploadCloud size={14} color="var(--primary)" /> Cloudinary Image Uploader
+                      </h4>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                        Upload files directly to Cloudinary and sync with your workspace background library.
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            placeholder="Wallpaper display name (optional)"
+                            value={customWpName}
+                            onChange={(e) => setCustomWpName(e.target.value)}
+                          />
+                        </div>
+
+                        {uploadError && (
+                          <div style={{ fontSize: '11px', color: '#ef4444', padding: '6px', background: 'rgba(239,68,68,0.1)', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                            {uploadError}
+                          </div>
+                        )}
+
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          border: '2px dashed var(--panel-border)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '20px',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          transition: 'border-color 0.2s',
+                          background: 'rgba(255,255,255,0.005)'
+                        }}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileChange}
+                            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                            disabled={isUploading || !currentUser}
+                          />
+                          <UploadCloud size={28} color={isUploading ? 'var(--text-muted)' : 'var(--primary)'} style={{ transition: 'all 0.2s' }} />
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginTop: '4px' }}>
+                            {isUploading ? 'Uploading to Cloudinary...' : 'Click to Browse & Upload'}
+                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Supports PNG, JPG, WEBP formats</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Fallback Paste URL Form */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid var(--panel-border)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+                      <h4 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: 'var(--text-primary)' }}>Or Link Image URL</h4>
+                      <form onSubmit={handleAddCustomWallpaper} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <input
+                            type="url"
+                            className="form-input"
+                            placeholder="https://example.com/background.jpg"
+                            value={customWpUrl}
+                            onChange={(e) => setCustomWpUrl(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start', padding: '6px 12px', fontSize: '11px', gap: '4px' }}>
+                          <Plus size={12} /> Add via URL
+                        </button>
+                      </form>
+                    </div>
+
+                  </div>
+
                 </div>
               </div>
             )}
@@ -2193,6 +3082,8 @@ function App() {
           </div>
         </div>
       )}
+
+
     </div>
   );
 }
