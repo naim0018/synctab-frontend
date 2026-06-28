@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Plus, Search, Share2, X, ChevronLeft, ChevronRight, ChevronDown, Trash2, Edit2, Check, RefreshCw
@@ -50,7 +50,14 @@ const DEFAULT_COLUMNS: Record<string, string[]> = {
 
 export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, onRefresh }) => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [collapsedSpaces, setCollapsedSpaces] = useState<Record<string, boolean>>({});
+  const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>(() => {
+    const userStr = localStorage.getItem('synctab_user');
+    const user = userStr ? JSON.parse(userStr) : null;
+    const userEmail = user?.email || 'User';
+    const syncSpaceId = `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    return { [syncSpaceId]: true };
+  });
+  const [pendingScrollColumn, setPendingScrollColumn] = useState<string | null>(null);
   const [selectedSpaceId, setSelectedSpaceId] = useState(() => {
     const userStr = localStorage.getItem('synctab_user');
     const user = userStr ? JSON.parse(userStr) : null;
@@ -144,6 +151,24 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
   const [showAddForm, setShowAddForm] = useState<Record<string, boolean>>({});
   const [newCardTitle, setNewCardTitle] = useState('');
   const [newCardUrl, setNewCardUrl] = useState('');
+
+  // Scroll to column when a space becomes active
+  useEffect(() => {
+    if (pendingScrollColumn) {
+      const el = document.getElementById(`col-${pendingScrollColumn}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        setPendingScrollColumn(null);
+      }
+    }
+  }, [selectedSpaceId, pendingScrollColumn]);
+
+  const currentSyncSpaceId = React.useMemo(() => {
+    const userStr = localStorage.getItem('synctab_user');
+    const user = userStr ? JSON.parse(userStr) : null;
+    const userEmail = user?.email || 'User';
+    return `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  }, []);
 
   // Save custom spaces & columns
   const saveSpaces = (newSpaces: typeof DEFAULT_SPACES) => {
@@ -1078,26 +1103,29 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                     ) : (
                       <div 
                         className={`bm-mgr-space-item ${selectedSpaceId === space.id ? 'active' : ''}`}
-                        onClick={() => setSelectedSpaceId(space.id)}
+                        onClick={() => {
+                          setSelectedSpaceId(space.id);
+                          setExpandedSpaces(prev => ({ ...prev, [space.id]: true }));
+                        }}
                       >
+                        {!isSidebarCollapsed && (
+                          <span 
+                            className="bm-mgr-space-chevron"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedSpaces(prev => ({ ...prev, [space.id]: !prev[space.id] }));
+                            }}
+                            style={{ marginRight: '4px', display: 'inline-flex', alignItems: 'center', opacity: selectedSpaceId === space.id ? 0.8 : 0.4 }}
+                          >
+                            {expandedSpaces[space.id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          </span>
+                        )}
                         <span style={{ fontSize: '15px' }}>{space.icon}</span>
                         <span className="bm-mgr-space-name">{space.name}</span>
                         
-                        {/* Space Actions (Edit / Delete / Toggle) */}
+                        {/* Space Actions (Edit / Delete) */}
                         {!isSidebarCollapsed && (
                           <div className="bm-mgr-space-actions">
-                            {selectedSpaceId === space.id && (
-                              <button 
-                                className="bm-mgr-icon-btn" 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setCollapsedSpaces(prev => ({ ...prev, [space.id]: !prev[space.id] }));
-                                }}
-                                title={collapsedSpaces[space.id] ? "Expand Columns" : "Minimize Columns"}
-                              >
-                                {collapsedSpaces[space.id] ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-                              </button>
-                            )}
                             <button 
                               className="bm-mgr-icon-btn" 
                               onClick={(e) => {
@@ -1110,8 +1138,8 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                             >
                               <Edit2 size={10} />
                             </button>
-                            {/* Do not allow deleting the core sync space */}
-                            {!space.isSyncSpace && (
+                            {/* Do not allow deleting the current user's sync space */}
+                            {space.id !== currentSyncSpaceId && (
                               <button 
                                 className="bm-mgr-icon-btn" 
                                 onClick={(e) => {
@@ -1128,11 +1156,11 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                       </div>
                     )}
 
-                    {/* Category sub-list when active */}
-                    {selectedSpaceId === space.id && !isSidebarCollapsed && !collapsedSpaces[space.id] && (
+                    {/* Category sub-list when expanded */}
+                    {!isSidebarCollapsed && !!expandedSpaces[space.id] && (
                       <div className="bm-mgr-subcategories">
-                        {activeColumns.map(colName => {
-                          const isColEditing = editingColName === colName;
+                        {(customColumns[space.id] || ['General']).map(colName => {
+                          const isColEditing = editingColName === colName && selectedSpaceId === space.id;
 
                           return (
                             <div key={colName} className="bm-mgr-subcat-wrapper">
@@ -1164,8 +1192,13 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                                 <div 
                                   className="bm-mgr-subcat-item"
                                   onClick={() => {
-                                    const el = document.getElementById(`col-${colName}`);
-                                    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                                    if (selectedSpaceId !== space.id) {
+                                      setSelectedSpaceId(space.id);
+                                      setPendingScrollColumn(colName);
+                                    } else {
+                                      const el = document.getElementById(`col-${colName}`);
+                                      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                                    }
                                   }}
                                 >
                                   <span style={{ opacity: 0.5 }}>#</span>
@@ -1274,10 +1307,63 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                   style={{ cursor: 'grab' }}
                 >
                   <div className="bm-mgr-column-title-wrapper">
-                    <span className="bm-mgr-column-title">{colName}</span>
-                    <span className="bm-mgr-column-count">{list.length}</span>
+                    {editingColName === colName ? (
+                      <div 
+                        className="bm-mgr-column-rename-row" 
+                        onClick={e => e.stopPropagation()} 
+                        onDragStart={e => e.stopPropagation()}
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <input 
+                          type="text" 
+                          value={editingColTempName} 
+                          onChange={e => setEditingColTempName(e.target.value)}
+                          className="bm-mgr-inline-input"
+                          style={{ fontSize: '13px', padding: '2px 6px', width: '120px' }}
+                          autoFocus
+                          required
+                        />
+                        <button 
+                          className="bm-mgr-icon-btn" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRenameColumn(colName);
+                          }}
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button 
+                          className="bm-mgr-icon-btn" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingColName(null);
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="bm-mgr-column-title">{colName}</span>
+                        <span className="bm-mgr-column-count">{list.length}</span>
+                      </>
+                    )}
                   </div>
                   <div className="bm-mgr-column-actions">
+                    {editingColName !== colName && (
+                      <button 
+                        className="bm-mgr-icon-btn" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingColName(colName);
+                          setEditingColTempName(colName);
+                        }}
+                        title="Rename Column"
+                        onDragStart={(e) => e.stopPropagation()}
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                    )}
                     <button 
                       className="bm-mgr-icon-btn" 
                       onClick={() => setShowAddForm(prev => ({ ...prev, [colName]: !prev[colName] }))}
@@ -1286,14 +1372,17 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                     >
                       <Plus size={14} />
                     </button>
-                    <button 
-                      className="bm-mgr-icon-btn" 
-                      onClick={() => handleDeleteColumn(colName)}
-                      title="Delete Column"
-                      onDragStart={(e) => e.stopPropagation()}
-                    >
-                      <X size={14} />
-                    </button>
+                    {/* Do not allow deleting columns of the default browser bookmarks sync space */}
+                    {selectedSpaceId !== currentSyncSpaceId && (
+                      <button 
+                        className="bm-mgr-icon-btn" 
+                        onClick={() => handleDeleteColumn(colName)}
+                        title="Delete Column"
+                        onDragStart={(e) => e.stopPropagation()}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
