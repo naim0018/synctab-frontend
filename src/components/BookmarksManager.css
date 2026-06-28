@@ -1108,5 +1108,41 @@
   to   { border-color: rgba(139, 92, 246, 0.8); background: rgba(139, 92, 246, 0.06); }
 }
 
+/* Column dropdown menu for open all actions */
+.bm-mgr-col-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #1c1d24;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  margin-top: 4px;
+}
+
+.bm-mgr-col-dropdown-item {
+  background: none;
+  border: none;
+  color: var(--text-primary, #ffffff);
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+  width: 100%;
+  font-family: inherit;
+}
+
+.bm-mgr-col-dropdown-item:hover {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
 
 

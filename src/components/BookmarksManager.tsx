@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Plus, Search, Share2, X, ChevronLeft, ChevronRight, ChevronDown, Trash2, Edit2, Check, RefreshCw
+  Plus, Search, Share2, X, ChevronLeft, ChevronRight, ChevronDown, Trash2, Edit2, Check, RefreshCw, FolderOpen
 } from 'lucide-react';
 import { useDragSort } from '../hooks/useDragSort';
 import './BookmarksManager.css';
@@ -65,7 +65,8 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     return `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
   });
   const [searchQuery, setSearchQuery] = useState('');
-  const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [openColMenu, setOpenColMenu] = useState<string | null>(null);
   
   // Custom spaces & columns state
   const [spaces, setSpaces] = useState(() => {
@@ -168,6 +169,15 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     const user = userStr ? JSON.parse(userStr) : null;
     const userEmail = user?.email || 'User';
     return `Sync_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  }, []);
+
+
+
+  // Click outside to close column dropdown menu
+  useEffect(() => {
+    const handleClose = () => setOpenColMenu(null);
+    window.addEventListener('click', handleClose);
+    return () => window.removeEventListener('click', handleClose);
   }, []);
 
   // Save custom spaces & columns
@@ -956,6 +966,37 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
     return acc;
   }, {} as Record<string, BookmarkItem[]>);
 
+  // Open all bookmarks in a column
+  const openAllBookmarks = useCallback((colName: string, inNewWindow: boolean) => {
+    const list = columnBookmarks[colName] || [];
+    const urls = list.map(b => b.url).filter(Boolean);
+    if (urls.length === 0) return;
+
+    if (typeof window !== 'undefined' && (window as any).chrome && (window as any).chrome.tabs) {
+      if (inNewWindow) {
+        (window as any).chrome.windows.create({ url: urls });
+      } else {
+        urls.forEach(url => {
+          (window as any).chrome.tabs.create({ url });
+        });
+      }
+    } else {
+      if (inNewWindow) {
+        const firstUrl = urls[0];
+        const newWin = window.open(firstUrl, '_blank');
+        if (newWin) {
+          urls.slice(1).forEach(url => {
+            newWin.open(url, '_blank');
+          });
+        }
+      } else {
+        urls.forEach(url => {
+          window.open(url, '_blank');
+        });
+      }
+    }
+  }, [columnBookmarks]);
+
   return (
     <div className="bm-mgr-container">
       {/* Ghost drag element */}
@@ -1349,7 +1390,18 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                       </>
                     )}
                   </div>
-                  <div className="bm-mgr-column-actions">
+                  <div className="bm-mgr-column-actions" style={{ position: 'relative' }}>
+                    <button 
+                      className="bm-mgr-icon-btn" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenColMenu(openColMenu === colName ? null : colName);
+                      }}
+                      title="Open All Options"
+                      onDragStart={(e) => e.stopPropagation()}
+                    >
+                      <FolderOpen size={14} />
+                    </button>
                     {editingColName !== colName && (
                       <button 
                         className="bm-mgr-icon-btn" 
@@ -1382,6 +1434,30 @@ export const BookmarksManager: React.FC<BookmarksManagerProps> = ({ bookmarks, o
                       >
                         <X size={14} />
                       </button>
+                    )}
+
+                    {/* Column Dropdown Menu */}
+                    {openColMenu === colName && (
+                      <div className="bm-mgr-col-dropdown" onClick={e => e.stopPropagation()}>
+                        <button 
+                          className="bm-mgr-col-dropdown-item"
+                          onClick={() => {
+                            openAllBookmarks(colName, false);
+                            setOpenColMenu(null);
+                          }}
+                        >
+                          Open all in new tabs
+                        </button>
+                        <button 
+                          className="bm-mgr-col-dropdown-item"
+                          onClick={() => {
+                            openAllBookmarks(colName, true);
+                            setOpenColMenu(null);
+                          }}
+                        >
+                          Open all in a new window
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
