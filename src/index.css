@@ -2120,3 +2120,14 @@ body {
   box-shadow: 0 0 12px var(--primary-glow);
 }
 
+/* Sidebar Drop Zone Highlight */
+.edge-menu.drag-over {
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 24px;
+  padding: 20px 10px;
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.05);
+  transition: all 0.2s ease;
+}
+
+

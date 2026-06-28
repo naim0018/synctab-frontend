@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import WidgetCanvas from './widgets/WidgetCanvas';
+import { BookmarksManager } from './components/BookmarksManager';
 import {
   Bookmark as BookmarkIcon,
   Plus,
@@ -29,7 +31,9 @@ import {
   Unlink,
   KeyRound,
   Mail,
-  AlertCircle
+  AlertCircle,
+  Grid,
+  Move
 } from 'lucide-react';
 
 declare global {
@@ -164,10 +168,125 @@ const AvatarDisplay = ({ avatar, name, size = 36, className = '' }: { avatar: st
 
 function App() {
   // Navigation & UI state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'bookmarks' | 'notes' | 'tasks' | 'reminders' | 'chat' | 'customize'>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Custom Pages states
+  const [customPages, setCustomPages] = useState<{ id: string; name: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('synctab-custom-pages');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isCustomPageModalOpen, setIsCustomPageModalOpen] = useState(false);
+  const [newCustomPageName, setNewCustomPageName] = useState('');
+
+  useEffect(() => {
+    localStorage.setItem('synctab-custom-pages', JSON.stringify(customPages));
+  }, [customPages]);
+
+  // Sidebar drag-and-drop state
+  const [menuItemSides, setMenuItemSides] = useState<Record<string, 'left' | 'right'>>(() => {
+    const defaults: Record<string, 'left' | 'right'> = {
+      dashboard: 'left',
+      bookmarks: 'left',
+      notes: 'left',
+      customize: 'left',
+      widgets: 'left',
+      edit_widgets: 'left',
+      tasks: 'right',
+      reminders: 'right',
+      chat: 'right',
+    };
+    try {
+      const saved = localStorage.getItem('synctab-menu-item-sides');
+      if (saved) {
+        return { ...defaults, ...JSON.parse(saved) };
+      }
+      return defaults;
+    } catch {
+      return defaults;
+    }
+  });
+
+  const [isWidgetEditing, setIsWidgetEditing] = useState(false);
+  const [isWidgetPanelOpen, setIsWidgetPanelOpen] = useState(false);
+  const [draggingOverSide, setDraggingOverSide] = useState<'left' | 'right' | null>(null);
+
+  const handleMenuDragStart = (e: React.DragEvent, tabId: string) => {
+    e.dataTransfer.setData('text/plain', tabId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleSidebarDrop = (e: React.DragEvent, side: 'left' | 'right') => {
+    e.preventDefault();
+    setDraggingOverSide(null);
+    const tabId = e.dataTransfer.getData('text/plain');
+    if (tabId) {
+      setMenuItemSides(prev => {
+        const next = { ...prev, [tabId]: side };
+        localStorage.setItem('synctab-menu-item-sides', JSON.stringify(next));
+        return next;
+      });
+    }
+  };
+
+  const renderMenuItem = (id: string, label: string, icon: React.ReactNode) => {
+    const isWidgets = id === 'widgets';
+    const isEditWidgets = id === 'edit_widgets';
+    const isActive = isWidgets 
+      ? isWidgetPanelOpen 
+      : isEditWidgets 
+        ? isWidgetEditing 
+        : activeTab === id;
+
+    const onClick = () => {
+      if (isWidgets) {
+        if (activeTab !== 'dashboard' && !activeTab.startsWith('page_')) {
+          setActiveTab('dashboard');
+        }
+        setIsWidgetPanelOpen(prev => !prev);
+        setIsWidgetEditing(false);
+      } else if (isEditWidgets) {
+        if (activeTab !== 'dashboard' && !activeTab.startsWith('page_')) {
+          setActiveTab('dashboard');
+        }
+        setIsWidgetEditing(prev => !prev);
+        setIsWidgetPanelOpen(false);
+      } else {
+        setActiveTab(id);
+        setIsWidgetEditing(false);
+        setIsWidgetPanelOpen(false);
+      }
+    };
+
+    return (
+      <div 
+        key={id} 
+        className="edge-menu-item-wrapper"
+        draggable
+        onDragStart={(e) => handleMenuDragStart(e, id)}
+        style={{ cursor: 'grab' }}
+      >
+        <button
+          onClick={onClick}
+          className={`edge-menu-btn ${isActive ? 'active' : ''}`}
+          title={label}
+        >
+          {icon}
+        </button>
+        <span className="edge-menu-label" style={{ maxWidth: '64px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {label}
+        </span>
+      </div>
+    );
+  };
+
+
 
   // Customize & Wallpaper states
   const [currentWallpaper, setCurrentWallpaper] = useState(() => {
@@ -370,8 +489,7 @@ function App() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
 
-  // Bookmark sorting/categories
-  const [selectedBookmarkCat, setSelectedBookmarkCat] = useState<string>('All');
+
   
   // Modals state
   const [isBookmarkModalOpen, setIsBookmarkModalOpen] = useState(false);
@@ -558,6 +676,18 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  // Listen to quick-added bookmarks in widgets
+  useEffect(() => {
+    const handleRefresh = () => {
+      if (currentUser) {
+        fetchBookmarks(currentUser);
+      }
+    };
+    window.addEventListener('synctab-refresh-bookmarks', handleRefresh);
+    return () => window.removeEventListener('synctab-refresh-bookmarks', handleRefresh);
+  }, [currentUser]);
+
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -1397,28 +1527,7 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
-  const handleBookmarkClick = async (bookmark: Bookmark) => {
-    window.open(bookmark.url, '_blank');
-    if (!isOnline) {
-      setBookmarks((prev) => prev.map((b) => (b.id === bookmark.id ? { ...b, clicks: b.clicks + 1 } : b)));
-      return;
-    }
-    try {
-      await fetch(`${API_BASE}/bookmarks/${bookmark.id}/click`, { method: 'POST' });
-    } catch (e) { console.error(e); }
-  };
 
-  const handleDeleteBookmark = async (bookmarkId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!isOnline) {
-      setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
-      return;
-    }
-    try {
-      await fetch(`${API_BASE}/bookmarks/${bookmarkId}`, { method: 'DELETE' });
-    } catch (e) { console.error(e); }
-  };
 
   // ==================== NOTES CRUD ====================
 
@@ -1675,12 +1784,7 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
-  // Filters bookmarks categories
-  const bookmarkCategories = ['All', ...Array.from(new Set(bookmarks.map((b) => b.category)))];
-  const filteredBookmarks = bookmarks.filter((b) => {
-    if (selectedBookmarkCat === 'All') return true;
-    return b.category === selectedBookmarkCat;
-  });
+
 
   if (loading) {
     return (
@@ -1949,86 +2053,83 @@ function App() {
   return (
     <div className="app-container">
       {/* Left Edge Navigation */}
-      <div className="edge-menu left-side">
+      <div 
+        className={`edge-menu left-side ${draggingOverSide === 'left' ? 'drag-over' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); setDraggingOverSide('left'); }}
+        onDragLeave={() => setDraggingOverSide(null)}
+        onDrop={(e) => handleSidebarDrop(e, 'left')}
+      >
+        {menuItemSides.dashboard === 'left' && renderMenuItem('dashboard', 'Home', <Globe size={20} />)}
+        
+        {visibleTabs.bookmarks && menuItemSides.bookmarks === 'left' && renderMenuItem('bookmarks', 'Bookmarks', <BookmarkIcon size={20} />)}
+        
+        {visibleTabs.notes && menuItemSides.notes === 'left' && renderMenuItem('notes', 'Notes', <FileText size={20} />)}
+        
+        {menuItemSides.customize === 'left' && renderMenuItem('customize', 'Customize', <Sliders size={20} />)}
+
+        {menuItemSides.widgets === 'left' && renderMenuItem('widgets', 'Widgets', <Grid size={20} />)}
+
+        {menuItemSides.edit_widgets === 'left' && renderMenuItem('edit_widgets', 'Edit Layout', <Move size={20} />)}
+
+        {visibleTabs.tasks && menuItemSides.tasks === 'left' && renderMenuItem('tasks', 'Tasks', <CheckSquare size={20} />)}
+
+        {visibleTabs.reminders && menuItemSides.reminders === 'left' && renderMenuItem('reminders', 'Reminders', <Clock size={20} />)}
+
+        {visibleTabs.chat && menuItemSides.chat === 'left' && renderMenuItem('chat', 'Chat', <MessageSquare size={20} />)}
+
+        {/* Custom Pages on Left */}
+        {customPages.map((page) => {
+          if (menuItemSides[page.id] === 'right') return null;
+          return renderMenuItem(page.id, page.name, <Layout size={20} />);
+        })}
+
+        {/* Add Custom Page Button */}
         <div className="edge-menu-item-wrapper">
           <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`edge-menu-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => {
+              setNewCustomPageName('');
+              setIsCustomPageModalOpen(true);
+            }}
+            className="edge-menu-btn"
+            style={{ borderStyle: 'dashed', background: 'rgba(255, 255, 255, 0.03)' }}
+            title="Create Custom Page"
           >
-            <Globe size={20} />
+            <Plus size={20} />
           </button>
-          <span className="edge-menu-label">Home</span>
-        </div>
-        {visibleTabs.bookmarks && (
-          <div className="edge-menu-item-wrapper">
-            <button
-              onClick={() => setActiveTab('bookmarks')}
-              className={`edge-menu-btn ${activeTab === 'bookmarks' ? 'active' : ''}`}
-            >
-              <BookmarkIcon size={20} />
-            </button>
-            <span className="edge-menu-label">Bookmarks</span>
-          </div>
-        )}
-        {visibleTabs.notes && (
-          <div className="edge-menu-item-wrapper">
-            <button
-              onClick={() => setActiveTab('notes')}
-              className={`edge-menu-btn ${activeTab === 'notes' ? 'active' : ''}`}
-            >
-              <FileText size={20} />
-            </button>
-            <span className="edge-menu-label">Notes</span>
-          </div>
-        )}
-        {/* Customize Menu Item */}
-        <div className="edge-menu-item-wrapper">
-          <button
-            onClick={() => setActiveTab('customize')}
-            className={`edge-menu-btn ${activeTab === 'customize' ? 'active' : ''}`}
-            title="Customize Dashboard"
-          >
-            <Sliders size={20} />
-          </button>
-          <span className="edge-menu-label">Customize</span>
+          <span className="edge-menu-label">Add Page</span>
         </div>
       </div>
 
       {/* Right Edge Navigation */}
-      <div className="edge-menu right-side">
-        {visibleTabs.tasks && (
-          <div className="edge-menu-item-wrapper">
-            <button
-              onClick={() => setActiveTab('tasks')}
-              className={`edge-menu-btn ${activeTab === 'tasks' ? 'active' : ''}`}
-            >
-              <CheckSquare size={20} />
-            </button>
-            <span className="edge-menu-label">Tasks</span>
-          </div>
-        )}
-        {visibleTabs.reminders && (
-          <div className="edge-menu-item-wrapper">
-            <button
-              onClick={() => setActiveTab('reminders')}
-              className={`edge-menu-btn ${activeTab === 'reminders' ? 'active' : ''}`}
-            >
-              <Clock size={20} />
-            </button>
-            <span className="edge-menu-label">Reminders</span>
-          </div>
-        )}
-        {visibleTabs.chat && (
-          <div className="edge-menu-item-wrapper">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`edge-menu-btn ${activeTab === 'chat' ? 'active' : ''}`}
-            >
-              <MessageSquare size={20} />
-            </button>
-            <span className="edge-menu-label">Chat</span>
-          </div>
-        )}
+      <div 
+        className={`edge-menu right-side ${draggingOverSide === 'right' ? 'drag-over' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); setDraggingOverSide('right'); }}
+        onDragLeave={() => setDraggingOverSide(null)}
+        onDrop={(e) => handleSidebarDrop(e, 'right')}
+      >
+        {menuItemSides.dashboard === 'right' && renderMenuItem('dashboard', 'Home', <Globe size={20} />)}
+        
+        {visibleTabs.bookmarks && menuItemSides.bookmarks === 'right' && renderMenuItem('bookmarks', 'Bookmarks', <BookmarkIcon size={20} />)}
+        
+        {visibleTabs.notes && menuItemSides.notes === 'right' && renderMenuItem('notes', 'Notes', <FileText size={20} />)}
+        
+        {menuItemSides.customize === 'right' && renderMenuItem('customize', 'Customize', <Sliders size={20} />)}
+
+        {menuItemSides.widgets === 'right' && renderMenuItem('widgets', 'Widgets', <Grid size={20} />)}
+
+        {menuItemSides.edit_widgets === 'right' && renderMenuItem('edit_widgets', 'Edit Layout', <Move size={20} />)}
+
+        {visibleTabs.tasks && menuItemSides.tasks === 'right' && renderMenuItem('tasks', 'Tasks', <CheckSquare size={20} />)}
+
+        {visibleTabs.reminders && menuItemSides.reminders === 'right' && renderMenuItem('reminders', 'Reminders', <Clock size={20} />)}
+
+        {visibleTabs.chat && menuItemSides.chat === 'right' && renderMenuItem('chat', 'Chat', <MessageSquare size={20} />)}
+
+        {/* Custom Pages on Right */}
+        {customPages.map((page) => {
+          if (menuItemSides[page.id] !== 'right') return null;
+          return renderMenuItem(page.id, page.name, <Layout size={20} />);
+        })}
       </div>
 
       {/* Main content area */}
@@ -2043,7 +2144,7 @@ function App() {
           {/* User Profile Avatar with dropdown trigger */}
           {currentUser && (
             <button className="widget-circle-btn widget-profile-btn" onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-              style={{ position: 'relative', padding: 0, overflow: 'visible', background: 'transparent', border: 'none' }}
+              style={{ position: 'relative', padding: 0, overflow: 'visible', background: 'transparent', border: 'none', cursor: 'pointer' }}
             >
               <div style={{ position: 'relative', display: 'inline-flex' }}>
                 <AvatarDisplay avatar={currentUser.avatar} name={currentUser.name} size={36} />
@@ -2285,104 +2386,121 @@ function App() {
             
             {/* A. DASHBOARD VIEW (Home view with Circle and Search) */}
             {activeTab === 'dashboard' && (
-              <div className="home-page-container">
-                {/* Glowing Circle Widget */}
-                <div className="circle-widget">
-                  <div className="circle-time" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '4px' }}>
-                    <span>{timeStr.slice(0, 5)}</span>
-                    {!clockFormat24h && timeStr.split(' ')[1] && (
-                      <span style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', opacity: 0.8, color: 'var(--primary)', letterSpacing: '0.5px' }}>
-                        {timeStr.split(' ')[1]}
-                      </span>
-                    )}
+              <div style={{ position: 'relative', width: '100%', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Static dashboard content (clock, search) */}
+                <div className="home-page-container" style={{ pointerEvents: 'auto', zIndex: 5, position: 'relative' }}>
+                  {/* Glowing Circle Widget */}
+                  <div className="circle-widget">
+                    <div className="circle-time" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '4px' }}>
+                      <span>{timeStr.slice(0, 5)}</span>
+                      {!clockFormat24h && timeStr.split(' ')[1] && (
+                        <span style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', opacity: 0.8, color: 'var(--primary)', letterSpacing: '0.5px' }}>
+                          {timeStr.split(' ')[1]}
+                        </span>
+                      )}
+                    </div>
+                    <div className="circle-greeting">
+                      {customGreeting || (() => {
+                        const hour = new Date().getHours();
+                        const name = currentUser?.name.split(' ')[0] || 'User';
+                        if (hour < 12) return `Good morning, ${name}`;
+                        if (hour < 18) return `Good afternoon, ${name}`;
+                        return `Good evening, ${name}`;
+                      })()}
+                    </div>
+                    <div className="circle-date" style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', opacity: 0.8 }}>
+                      {dateStr}
+                    </div>
                   </div>
-                  <div className="circle-greeting">
-                    {customGreeting || (() => {
-                      const hour = new Date().getHours();
-                      const name = currentUser?.name.split(' ')[0] || 'User';
-                      if (hour < 12) return `Good morning, ${name}`;
-                      if (hour < 18) return `Good afternoon, ${name}`;
-                      return `Good evening, ${name}`;
-                    })()}
-                  </div>
-                  <div className="circle-date" style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px', opacity: 0.8 }}>
-                    {dateStr}
-                  </div>
+
+                  {/* Sleek Search Bar */}
+                  <form onSubmit={handleSearchSubmit} className="search-bar-container">
+                    <input
+                      type="text"
+                      className="search-input"
+                      placeholder="Search Google..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    <button type="submit" className="search-btn">
+                      <Search size={18} />
+                    </button>
+                  </form>
                 </div>
 
-                {/* Sleek Search Bar */}
-                <form onSubmit={handleSearchSubmit} className="search-bar-container">
-                  <input
-                    type="text"
-                    className="search-input"
-                    placeholder="Search Google..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                  <button type="submit" className="search-btn">
-                    <Search size={18} />
-                  </button>
-                </form>
+                {/* Draggable Widget Canvas — floats above dashboard content */}
+                <WidgetCanvas
+                  pageId="dashboard"
+                  tasks={tasks}
+                  bookmarks={bookmarks}
+                  isEditing={isWidgetEditing}
+                  setIsEditing={setIsWidgetEditing}
+                  isPanelOpen={isWidgetPanelOpen}
+                  setIsPanelOpen={setIsWidgetPanelOpen}
+                />
               </div>
             )}
 
+            {/* CUSTOM PAGE VIEW */}
+            {(() => {
+              const customPage = customPages.find(p => p.id === activeTab);
+              if (customPage) {
+                return (
+                  <div style={{ position: 'relative', width: '100%', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ padding: '24px 40px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 11 }}>
+                      <div>
+                        <h2 style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Layout size={24} color="var(--primary)" /> {customPage.name}
+                        </h2>
+                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                          Drag and place widgets to design your custom dashboard layout.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          if (confirm(`Are you sure you want to delete the page "${customPage.name}"?`)) {
+                            setCustomPages(prev => prev.filter(p => p.id !== customPage.id));
+                            setActiveTab('dashboard');
+                          }
+                        }}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          color: '#ef4444',
+                          padding: '8px 16px',
+                          borderRadius: '20px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Trash2 size={14} /> Delete Page
+                      </button>
+                    </div>
+                    <WidgetCanvas
+                      pageId={customPage.id}
+                      tasks={tasks}
+                      bookmarks={bookmarks}
+                      isEditing={isWidgetEditing}
+                      setIsEditing={setIsWidgetEditing}
+                      isPanelOpen={isWidgetPanelOpen}
+                      setIsPanelOpen={setIsWidgetPanelOpen}
+                    />
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             {/* B. DETAILED BOOKMARKS VIEW */}
             {activeTab === 'bookmarks' && (
-              <div className="widget-container glass-panel">
-                <div className="widget-header-row">
-                  <div>
-                    <h3 className="widget-title"><BookmarkIcon size={20} color="var(--primary)" /> Manage Bookmarks</h3>
-                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                      Add personal bookmarks or share useful URLs with your workspace team.
-                    </p>
-                  </div>
-                  <button className="btn-primary" onClick={() => setIsBookmarkModalOpen(true)}>
-                    <Plus size={16} /> Add Bookmark
-                  </button>
-                </div>
-
-                <div className="bookmark-tabs">
-                  {bookmarkCategories.map((cat) => (
-                    <button
-                      key={cat}
-                      className={`bookmark-tab ${selectedBookmarkCat === cat ? 'active' : ''}`}
-                      onClick={() => setSelectedBookmarkCat(cat)}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="bookmarks-grid">
-                  {filteredBookmarks.map((b) => (
-                    <div
-                      key={b.id}
-                      className="bookmark-card"
-                      onClick={() => handleBookmarkClick(b)}
-                      style={{ minHeight: '140px' }}
-                    >
-                      {b.isShared && <span className="bookmark-shared-tag">Shared</span>}
-                      <button
-                        className="bookmark-delete-btn"
-                        onClick={(e) => handleDeleteBookmark(b.id, e)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                      <div className="bookmark-icon-box">
-                        <Globe size={18} />
-                      </div>
-                      <div className="bookmark-title">{b.title}</div>
-                      <div className="bookmark-clicks" style={{ fontSize: '11px' }}>{b.category} • {b.clicks} clicks</div>
-                    </div>
-                  ))}
-                  {filteredBookmarks.length === 0 && (
-                    <div className="empty-state widget-span-12">
-                      <span className="empty-state-icon">📂</span>
-                      <span>No bookmarks found in this category.</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <BookmarksManager 
+                bookmarks={bookmarks} 
+                onRefresh={() => fetchBookmarks()} 
+              />
             )}
 
             {/* C. DETAILED NOTES VIEW */}
@@ -3588,6 +3706,51 @@ function App() {
         </div>
       )}
 
+      {/* 3. Custom Page Modal */}
+      {isCustomPageModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-panel" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 style={{ fontSize: '16px', fontWeight: 700 }}>Create Custom Page</h3>
+              <button className="modal-close" onClick={() => setIsCustomPageModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newCustomPageName.trim()) return;
+                const newId = `page_${Date.now()}`;
+                setCustomPages(prev => [...prev, { id: newId, name: newCustomPageName.trim() }]);
+                setActiveTab(newId);
+                setIsCustomPageModalOpen(false);
+              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}
+            >
+              <div className="form-group">
+                <label className="form-label">Page Name</label>
+                <input
+                  type="text"
+                  required
+                  className="form-input"
+                  placeholder="e.g., Work Dashboard, Personal, Finance"
+                  value={newCustomPageName}
+                  onChange={(e) => setNewCustomPageName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => setIsCustomPageModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary">
+                  Create Page
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );
