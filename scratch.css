@@ -1,0 +1,2 @@
+/* ── IssueTracker Layout ── */
+.it-root { display: flex; height: 100%; width: 100%; overflow: hidden; background: #0b0e14; color: #e2e8f0; font-family: 'Inter', sans-serif; }

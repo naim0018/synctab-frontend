@@ -4,8 +4,6 @@ import './IssueTracker.css';
 const API = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:3000';
 
 const getUser = () => { try { const s = localStorage.getItem('synctab_user'); return s ? JSON.parse(s) : null; } catch { return null; } };
-const fmtDate = (d: string | null | undefined) => { if (!d) return '—'; const dt = new Date(d); return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
-const isOverdue = (d: string | null | undefined) => d ? new Date(d) < new Date() : false;
 const timeAgo = (d: string) => { const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000); if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s/60)}m ago`; if (s < 86400) return `${Math.floor(s/3600)}h ago`; return `${Math.floor(s/86400)}d ago`; };
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
@@ -91,15 +89,6 @@ export const IssueTracker: React.FC = () => {
     setLoading(false);
   };
 
-  const toggleStatus = async (issue: Issue) => {
-    const next = issue.status === 'done' ? 'open' : 'done';
-    const r = await fetch(`${API}/issues/${issue.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
-    if (r.ok) {
-      setIssues(prev => prev.map(i => i.id === issue.id ? { ...i, status: next } : i));
-      if (selectedIssue?.id === issue.id) setSelectedIssue(prev => prev ? { ...prev, status: next } : prev);
-    }
-  };
-
   const changeStatus = async (issueId: string, status: string) => {
     const r = await fetch(`${API}/issues/${issueId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
     if (r.ok) {
@@ -175,7 +164,10 @@ export const IssueTracker: React.FC = () => {
             <div className="it-no-project-icon">🗂️</div>
             <div className="it-no-project-title">Select or create a project</div>
             <div className="it-no-project-sub">Track and resolve issues with your team</div>
-            <button className="it-btn it-btn-primary" onClick={() => setShowNewProject(true)}>＋ New Project</button>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+              <button className="it-btn it-btn-primary" onClick={() => setShowNewProject(true)}>＋ New Project</button>
+              <button className="it-btn it-btn-ghost" onClick={() => setShowJoin(true)}>🔗 Join Project</button>
+            </div>
           </div>
         ) : (
           <>
@@ -213,21 +205,17 @@ export const IssueTracker: React.FC = () => {
                     </div>
                     <div className="it-kanban-body">
                       {columnIssues.map(issue => (
-                        <div key={issue.id} className={`it-issue-card ${issue.status === 'done' || issue.status === 'closed' ? 'done' : ''}`}>
-                          <button className="it-issue-status-btn" onClick={e => { e.stopPropagation(); toggleStatus(issue); }} title={issue.status === 'done' ? 'Reopen' : 'Mark done'}>
-                            {STATUS_ICONS[issue.status] ?? STATUS_ICONS.open}
-                          </button>
-                          <div className="it-issue-body" onClick={() => setSelectedIssue(issue)}>
-                            <div className={`it-issue-title ${issue.status === 'done' || issue.status === 'closed' ? 'done' : ''}`}>{issue.title}</div>
-                            <div className="it-issue-meta">
-                              <span className={`it-badge it-priority-${issue.priority}`}>▲ {issue.priority}</span>
-                              {issue.label && <span className="it-badge it-label-badge">#{issue.label}</span>}
-                              {issue.dueDate && <span className={`it-badge it-due-badge ${isOverdue(issue.dueDate) && issue.status !== 'done' ? 'overdue' : ''}`}>📅 {fmtDate(issue.dueDate)}</span>}
-                              <span className="it-comment-count">💬 {issue._count?.comments ?? 0}</span>
-                            </div>
+                        <div key={issue.id} className={`it-issue-card ${issue.status === 'done' || issue.status === 'closed' ? 'done' : ''}`} onClick={() => setSelectedIssue(issue)}>
+                          <div className="it-issue-tags">
+                            <span className={`it-badge it-priority-${issue.priority}`}>• {issue.priority}</span>
+                            {issue.label && <span className="it-badge it-label-badge">{issue.label}</span>}
                           </div>
-                          <div className="it-issue-card-actions">
-                            <button className="it-icon-btn danger" onClick={e => { e.stopPropagation(); deleteIssue(issue.id); }} title="Delete">✕</button>
+                          <div className={`it-issue-title ${issue.status === 'done' || issue.status === 'closed' ? 'done' : ''}`}>
+                            {issue.title}
+                          </div>
+                          <div className="it-issue-footer">
+                            <span className="it-issue-id">ID-{issue.id.slice(0, 4).toUpperCase()}</span>
+                            <div className="it-issue-avatar">{issue.creatorId.slice(0, 2).toUpperCase()}</div>
                           </div>
                         </div>
                       ))}
@@ -245,57 +233,91 @@ export const IssueTracker: React.FC = () => {
         <div className="it-detail-overlay" onClick={() => setSelectedIssue(null)}>
           <div className="it-detail-panel" onClick={e => e.stopPropagation()}>
             <div className="it-detail-header">
-              <div>{STATUS_ICONS[selectedIssue.status] ?? STATUS_ICONS.open}</div>
               <div className="it-detail-header-title">{selectedIssue.title}</div>
               <button className="it-icon-btn" onClick={() => setSelectedIssue(null)}>✕</button>
             </div>
-            <div className="it-detail-body">
-              {/* Status */}
-              <div>
-                <div className="it-detail-section-label">Status</div>
-                <div className="it-detail-status-row">
-                  {['open', 'in_progress', 'done', 'closed'].map(s => (
-                    <button key={s} className={`it-status-chip ${selectedIssue.status === s ? `active-${s}` : ''}`} onClick={() => changeStatus(selectedIssue.id, s)}>
-                      {s === 'open' ? '○ Open' : s === 'in_progress' ? '◑ In Progress' : s === 'done' ? '✓ Done' : '— Closed'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Description */}
-              <div>
+            
+            <div className="it-detail-layout">
+              <div className="it-detail-main">
                 <div className="it-detail-section-label">Description</div>
-                <div className="it-detail-desc">{selectedIssue.description || <span style={{ color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>No description</span>}</div>
-              </div>
-
-              {/* Meta */}
-              <div className="it-detail-meta-grid">
-                <div className="it-detail-meta-item"><div className="it-detail-meta-key">Priority</div><div className="it-detail-meta-val"><span className={`it-badge it-priority-${selectedIssue.priority}`}>▲ {selectedIssue.priority}</span></div></div>
-                <div className="it-detail-meta-item"><div className="it-detail-meta-key">Label</div><div className="it-detail-meta-val">{selectedIssue.label ? <span className="it-badge it-label-badge">#{selectedIssue.label}</span> : '—'}</div></div>
-                <div className="it-detail-meta-item"><div className="it-detail-meta-key">Due Date</div><div className="it-detail-meta-val" style={{ color: isOverdue(selectedIssue.dueDate) && selectedIssue.status !== 'done' ? '#f87171' : undefined }}>{fmtDate(selectedIssue.dueDate)}</div></div>
-                <div className="it-detail-meta-item"><div className="it-detail-meta-key">Created</div><div className="it-detail-meta-val">{fmtDate(selectedIssue.createdAt)}</div></div>
-              </div>
-
-              {/* Comments */}
-              <div>
-                <div className="it-detail-section-label">Comments ({comments.length})</div>
+                <div className="it-detail-desc">{selectedIssue.description || 'No description provided.'}</div>
+                
                 <div className="it-comments">
+                  <div className="it-detail-section-label">Comments ({comments.length})</div>
                   {comments.map(c => (
                     <div key={c.id} className="it-comment">
                       <div className="it-comment-head">
-                        <div className="it-comment-avatar">{c.authorId.slice(0, 2).toUpperCase()}</div>
+                        <div className="it-issue-avatar">{c.authorId.slice(0, 2).toUpperCase()}</div>
                         <span className="it-comment-author">{c.authorId === user?.id ? 'You' : 'Teammate'}</span>
                         <span className="it-comment-time">{timeAgo(c.createdAt)}</span>
-                        {c.authorId === user?.id && <button className="it-icon-btn danger" style={{ opacity: 0.6, fontSize: 10 }} onClick={() => deleteComment(c.id)}>✕</button>}
+                        {c.authorId === user?.id && <button className="it-icon-btn danger" style={{ marginLeft: 'auto', padding: '4px' }} onClick={() => deleteComment(c.id)}>✕</button>}
                       </div>
                       <div className="it-comment-text">{c.text}</div>
                     </div>
                   ))}
-                  <div className="it-comment-input-row">
-                    <textarea className="it-comment-textarea" placeholder="Add a comment…" value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitComment(); }} rows={2} />
-                    <button className="it-btn it-btn-primary" onClick={submitComment} disabled={!newComment.trim()} style={{ flexShrink: 0, alignSelf: 'flex-end' }}>Send</button>
+                  
+                  <div className="it-comment-input-box">
+                    <textarea className="it-comment-textarea" placeholder="Describe the issue, steps to reproduce, or expected behavior..." value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitComment(); }} />
+                    <div className="it-comment-actions">
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="it-icon-btn">🖼 Upload Image</button>
+                        <button className="it-icon-btn">🎥 Upload Video</button>
+                      </div>
+                      <button className="it-btn it-btn-primary" onClick={submitComment} disabled={!newComment.trim()}>Write</button>
+                    </div>
                   </div>
                 </div>
+              </div>
+              
+              <div className="it-detail-sidebar">
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Project</div>
+                  <select className="it-form-select" disabled>
+                    <option>{selectedProject?.name}</option>
+                  </select>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Status</div>
+                  <select className="it-form-select" value={selectedIssue.status} onChange={e => changeStatus(selectedIssue.id, e.target.value)}>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="done">Done</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Priority</div>
+                  <div className="it-issue-tags">
+                    <span className={`it-badge it-priority-${selectedIssue.priority}`}>• {selectedIssue.priority}</span>
+                  </div>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Assignee</div>
+                  <div className="it-assignee-box">
+                    <div className="it-issue-avatar">{selectedIssue.creatorId.slice(0, 2).toUpperCase()}</div>
+                    <span style={{ fontSize: 13, color: '#fff' }}>Assignee</span>
+                  </div>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Labels</div>
+                  <div className="it-issue-tags">
+                    {selectedIssue.label && <span className="it-badge it-label-badge">{selectedIssue.label}</span>}
+                    <button className="it-icon-btn" style={{ padding: '2px 8px', fontSize: 10 }}>+ Label</button>
+                  </div>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Attachments</div>
+                  <div className="it-upload-box">
+                    📄 Drop files or click to upload
+                  </div>
+                </div>
+                
+                <button className="it-btn it-btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={() => deleteIssue(selectedIssue.id)}>Delete Issue</button>
               </div>
             </div>
           </div>
@@ -325,29 +347,78 @@ export const IssueTracker: React.FC = () => {
 
       {/* New Issue Modal */}
       {showNewIssue && (
-        <div className="it-modal-overlay" onClick={() => setShowNewIssue(false)}>
-          <div className="it-modal" onClick={e => e.stopPropagation()}>
-            <div className="it-modal-header"><span className="it-modal-title">New Issue</span><button className="it-icon-btn" onClick={() => setShowNewIssue(false)}>✕</button></div>
-            <div className="it-modal-body">
-              <div className="it-form-group"><label className="it-form-label">Title</label><input className="it-form-input" placeholder="Issue title" value={iTitle} onChange={e => setITitle(e.target.value)} autoFocus /></div>
-              <div className="it-form-group"><label className="it-form-label">Description</label><textarea className="it-form-textarea" placeholder="Describe the issue…" value={iDesc} onChange={e => setIDesc(e.target.value)} /></div>
-              <div className="it-form-row">
-                <div className="it-form-group"><label className="it-form-label">Priority</label>
+        <div className="it-detail-overlay" onClick={() => setShowNewIssue(false)}>
+          <div className="it-detail-panel" onClick={e => e.stopPropagation()}>
+            <div className="it-detail-header">
+              <div className="it-detail-header-title">Create New Issue</div>
+              <button className="it-icon-btn" onClick={() => setShowNewIssue(false)}>✕</button>
+            </div>
+            
+            <div className="it-detail-layout">
+              <div className="it-detail-main">
+                <div className="it-form-group">
+                  <label className="it-form-label">Issue Title</label>
+                  <input className="it-form-input" placeholder="e.g., [API] Support for batch processing endpoints" value={iTitle} onChange={e => setITitle(e.target.value)} autoFocus />
+                </div>
+                
+                <div className="it-form-group">
+                  <label className="it-form-label">Description</label>
+                  <div className="it-comment-input-box" style={{ marginTop: 0 }}>
+                    <div className="it-comment-actions" style={{ borderTop: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)', marginTop: 0, paddingBottom: 12, marginBottom: 12 }}>
+                       <div style={{ display: 'flex', gap: '8px' }}>
+                          <button className="it-icon-btn"><b>B</b></button>
+                          <button className="it-icon-btn"><i>I</i></button>
+                          <button className="it-icon-btn">&lt;&gt;</button>
+                          <button className="it-icon-btn">🔗</button>
+                       </div>
+                    </div>
+                    <textarea className="it-comment-textarea" placeholder="Describe the issue, steps to reproduce, or expected behavior..." value={iDesc} onChange={e => setIDesc(e.target.value)} style={{ minHeight: 150 }} />
+                  </div>
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+                  <button className="it-btn it-btn-ghost" onClick={() => setShowNewIssue(false)}>Cancel</button>
+                  <button className="it-btn it-btn-primary" onClick={createIssue} disabled={!iTitle.trim() || loading}>Create Issue 🚀</button>
+                </div>
+              </div>
+              
+              <div className="it-detail-sidebar">
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Project</div>
+                  <select className="it-form-select" disabled>
+                    <option>{selectedProject?.name}</option>
+                  </select>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Priority</div>
                   <select className="it-form-select" value={iPriority} onChange={e => setIPriority(e.target.value)}>
                     {PRIORITY_ORDER.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
                   </select>
                 </div>
-                <div className="it-form-group"><label className="it-form-label">Label</label>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Assignee</div>
+                  <div className="it-assignee-box">
+                    <div className="it-issue-avatar">{user?.id.slice(0, 2).toUpperCase() || 'U'}</div>
+                    <span style={{ fontSize: 13, color: '#fff' }}>Assign to me</span>
+                  </div>
+                </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Labels</div>
                   <select className="it-form-select" value={iLabel} onChange={e => setILabel(e.target.value)}>
                     {LABEL_OPTIONS.map(l => <option key={l} value={l}>{l || 'None'}</option>)}
                   </select>
                 </div>
+                
+                <div className="it-sidebar-box">
+                  <div className="it-sidebar-box-title">Attachments</div>
+                  <div className="it-upload-box">
+                    📄 Drop files or click to upload
+                  </div>
+                </div>
               </div>
-              <div className="it-form-group"><label className="it-form-label">Due Date (optional)</label><input className="it-form-input" type="date" value={iDue} onChange={e => setIDue(e.target.value)} /></div>
-            </div>
-            <div className="it-modal-footer">
-              <button className="it-btn it-btn-ghost" onClick={() => setShowNewIssue(false)}>Cancel</button>
-              <button className="it-btn it-btn-primary" onClick={createIssue} disabled={!iTitle.trim() || loading}>Create Issue</button>
             </div>
           </div>
         </div>
