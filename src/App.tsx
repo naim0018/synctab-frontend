@@ -502,7 +502,7 @@ function App() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [_messages, setMessages] = useState<Message[]>([]);
 
   // Modals state
   const [isBookmarkModalOpen, setIsBookmarkModalOpen] = useState(false);
@@ -660,14 +660,21 @@ function App() {
       const cached = localStorage.getItem('synctab_user');
       let activeUser: User | null = null;
       if (cached) {
-        const cachedUser = JSON.parse(cached) as User;
-        const matchedUser = usersData.find((u) => u.id === cachedUser.id);
-        if (matchedUser) {
-          activeUser = matchedUser;
-          setCurrentUser(matchedUser);
-          localStorage.setItem('synctab_user', JSON.stringify(matchedUser));
-        } else {
-          console.warn('SyncTab: cached session is stale — clearing');
+        try {
+          const cachedUser = JSON.parse(cached) as User;
+          const serverUser = usersData.find((u) => u.id === cachedUser.id);
+          if (serverUser) {
+            // Session is valid — sync fresh data from server
+            activeUser = serverUser;
+            setCurrentUser(serverUser);
+            localStorage.setItem('synctab_user', JSON.stringify(serverUser));
+          } else {
+            // User ID not found in DB — DB was reset or user deleted. Force re-login.
+            console.warn('SyncTab: session invalid — userId not found in DB. Clearing session.');
+            localStorage.removeItem('synctab_user');
+            setCurrentUser(null);
+          }
+        } catch {
           localStorage.removeItem('synctab_user');
           setCurrentUser(null);
         }
@@ -844,11 +851,8 @@ function App() {
   };
 
   const fetchChatMessages = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/messages`);
-      const data = await unpackJson(res);
-      setMessages(data);
-    } catch (e) { console.error(e); }
+    // Chat is now handled by the dedicated ChatPage component via socket
+    // Nothing to fetch here
   };
 
   const fetchCustomWallpapers = async (user = currentUser) => {
@@ -991,54 +995,6 @@ function App() {
     }
   };
 
-  const handleRegister = async (nameVal: string, emailVal: string, passwordVal: string) => {
-    setAuthError(null);
-    setAuthLoading(true);
-    try {
-      if (!isOnline) {
-        throw new Error('Database is offline. Registration is disabled.');
-      }
-
-      const res = await fetch(`${API_BASE}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: nameVal,
-          email: emailVal,
-          password: passwordVal,
-          avatar: 'avatar-1',
-        }),
-      });
-
-      if (!res.ok) {
-        const errMsg = await unpackError(res, 'Registration failed');
-        throw new Error(errMsg);
-      }
-
-      const userData = await unpackJson(res);
-      localStorage.setItem('synctab_user', JSON.stringify(userData));
-      setCurrentUser(userData);
-
-      const resUsers = await fetch(`${API_BASE}/users`);
-      if (resUsers.ok) {
-        setUsers(await unpackJson(resUsers));
-      }
-
-      await Promise.all([
-        fetchNotes(userData),
-        fetchBookmarks(userData),
-        fetchTasks(),
-        fetchChatMessages(),
-        fetchCustomWallpapers(userData)
-      ]);
-    } catch (err: unknown) {
-      console.error(err);
-      const errMsg = err instanceof Error ? err.message : 'Registration failed';
-      setAuthError(errMsg);
-    } finally {
-      setAuthLoading(false);
-    }
-  };
 
   const handleGoogleLogin = async (email: string, name: string, avatar: string) => {
     setAuthError(null);
@@ -1532,33 +1488,6 @@ function App() {
     } catch (e) { console.error(e); }
   };
 
-  // Chat Page Actions
-  const handleSendChatMessage = async (text: string) => {
-    if (!currentUser) return;
-
-    if (!isOnline) {
-      const m: Message = {
-        id: `local-m-${Date.now()}`,
-        text: text,
-        userId: currentUser.id,
-        createdAt: new Date().toISOString(),
-        user: { id: currentUser.id, name: currentUser.name, avatar: currentUser.avatar }
-      };
-      setMessages((prev) => [...prev, m]);
-      return;
-    }
-
-    try {
-      await fetch(`${API_BASE}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: text,
-          userId: currentUser.id
-        })
-      });
-    } catch (e) { console.error(e); }
-  };
 
   const handleDeleteCustomPage = (id: string) => {
     const page = customPages.find(p => p.id === id);
@@ -1602,8 +1531,19 @@ function App() {
     return (
       <AuthPage
         onLogin={handleLogin}
-        onRegister={handleRegister}
         onGoogleLogin={handleGoogleLogin}
+        onGoogleLoginDirect={(user) => {
+          localStorage.setItem('synctab_user', JSON.stringify(user));
+          setCurrentUser(user);
+          // Load all data for the newly authenticated user
+          void Promise.all([
+            fetchNotes(user),
+            fetchBookmarks(user),
+            fetchTasks(),
+            fetchCustomWallpapers(user)
+          ]);
+        }}
+        onAuthError={(msg) => setAuthError(msg)}
         onOfflineDemoLogin={handleOfflineDemoLogin}
         isOnline={isOnline}
         loading={authLoading}
@@ -1970,10 +1910,7 @@ function App() {
 
           {/* F. DETAILED CHAT VIEW */}
           {activeTab === 'chat' && (
-            <ChatPage
-              messages={messages}
-              onSendMessage={handleSendChatMessage}
-            />
+            <ChatPage />
           )}
 
           {/* G. DETAILED CUSTOMIZE VIEW */}

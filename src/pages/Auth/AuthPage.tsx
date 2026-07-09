@@ -2,29 +2,28 @@ import { useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { LoginForm } from '../../components/Auth/LoginForm';
 import { RegisterForm } from '../../components/Auth/RegisterForm';
-import { GoogleSimModal } from '../../components/Auth/GoogleSimModal';
 
 interface AuthPageProps {
   onLogin: (email: string, password: string) => void;
-  onRegister: (name: string, email: string, password: string) => void;
   onGoogleLogin: (email: string, name: string, avatar: string) => void;
+  onGoogleLoginDirect: (user: { id: string; name: string; email: string; avatar: string; status: string }) => void;
   onOfflineDemoLogin: () => void;
   isOnline: boolean;
   loading: boolean;
   authError: string | null;
+  onAuthError: (msg: string) => void;
 }
 
 export const AuthPage = ({
   onLogin,
-  onRegister,
-  onGoogleLogin,
+  onGoogleLoginDirect,
   onOfflineDemoLogin,
   isOnline,
   loading,
-  authError
+  authError,
+  onAuthError,
 }: AuthPageProps) => {
   const [authTab, setAuthTab] = useState<'signin' | 'register'>('signin');
-  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
 
   return (
     <div className="auth-screen-container">
@@ -63,27 +62,41 @@ export const AuthPage = ({
         {authTab === 'signin' ? (
           <LoginForm
             onLogin={onLogin}
-            onGoogleLoginClick={() => setIsGoogleModalOpen(true)}
+            onGoogleSuccess={onGoogleLoginDirect}
+            onGoogleError={onAuthError}
             onOfflineDemoLogin={onOfflineDemoLogin}
             isOnline={isOnline}
             loading={loading}
           />
         ) : (
           <RegisterForm
-            onRegister={onRegister}
+            onRegister={(name, email, password) => {
+              // Register then login
+              void (async () => {
+                const API = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:3000';
+                try {
+                  const r = await fetch(`${API}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, password }),
+                  });
+                  if (!r.ok) {
+                    const d = await r.json();
+                    onAuthError(d.message || 'Registration failed');
+                    return;
+                  }
+                  const d = await r.json();
+                  const user = d.data || d;
+                  onGoogleLoginDirect(user);
+                } catch {
+                  onAuthError('Network error during registration');
+                }
+              })();
+            }}
             loading={loading}
           />
         )}
       </div>
-
-      <GoogleSimModal
-        isOpen={isGoogleModalOpen}
-        onClose={() => setIsGoogleModalOpen(false)}
-        onSelectAccount={(email, name, avatar) => {
-          onGoogleLogin(email, name, avatar);
-          setIsGoogleModalOpen(false);
-        }}
-      />
     </div>
   );
 };
