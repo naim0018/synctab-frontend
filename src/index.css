@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
 
 :root {
   /* Color Palette - Premium Space Obsidian Dark */
@@ -118,28 +119,36 @@
   box-shadow: 0 10px 30px rgba(139, 92, 246, 0.15);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
-body {
-  font-family: var(--font-sans);
-  background: var(--bg-app);
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg-app);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* App background image — only applied inside the main dashboard, not auth */
+.app-root {
   background-image: linear-gradient(rgba(6, 7, 10, 0.4), rgba(6, 7, 10, 0.85)), url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-attachment: fixed;
-  color: var(--text-primary);
-  min-height: 100vh;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
   transition: background-image 0.3s ease;
 }
 
-.light-theme body {
+.light-theme .app-root {
   background-image: linear-gradient(rgba(248, 250, 252, 0.65), rgba(248, 250, 252, 0.9)), url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80');
 }
 
@@ -2166,5 +2175,6 @@ body {
   box-shadow: 0 0 30px rgba(255, 255, 255, 0.05);
   transition: all 0.2s ease;
 }
+
 
 
