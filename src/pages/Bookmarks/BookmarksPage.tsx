@@ -163,6 +163,28 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
     ];
   });
 
+  const processAndSetTabs = useCallback((tabs: any[]) => {
+    const formatted = tabs
+      .filter(t => {
+        if (!t || !t.url || !t.title) return false;
+        const u = t.url.toLowerCase();
+        return !u.startsWith('chrome://') && 
+               !u.startsWith('chrome-extension://') && 
+               !u.startsWith('about:') && 
+               !u.startsWith('edge://');
+      })
+      .map((t, idx) => ({
+        id: t.id?.toString() || `tab_${idx}_${Date.now()}`,
+        title: t.title || '',
+        url: t.url || ''
+      }));
+    
+    if (formatted.length > 0) {
+      setOpenTabs(formatted);
+      localStorage.setItem('synctab_recent_tabs', JSON.stringify(formatted));
+    }
+  }, []);
+
   const refreshOpenTabs = useCallback(() => {
     try {
       if (
@@ -173,42 +195,32 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
       ) {
         (window as any).chrome.tabs.query({}, (tabs: any[]) => {
           if (Array.isArray(tabs)) {
-            const formatted = tabs
-              .filter(t => t && t.url && t.title)
-              .map((t, idx) => ({
-                id: t.id?.toString() || `tab_${idx}_${Date.now()}`,
-                title: t.title || '',
-                url: t.url || ''
-              }));
-            
-            const realUnique: Array<{ id: string; title: string; url: string }> = [];
-            const realSeen = new Set<string>();
-            for (const tab of formatted) {
-              let normUrl = tab.url.toLowerCase();
-              try {
-                const u = new URL(tab.url);
-                normUrl = (u.origin + u.pathname).toLowerCase().replace(/\/$/, '');
-              } catch (e) {}
-              
-              if (!realSeen.has(normUrl)) {
-                realSeen.add(normUrl);
-                realUnique.push(tab);
-              }
-            }
-            if (realUnique.length > 0) {
-              setOpenTabs(realUnique);
-              localStorage.setItem('synctab_recent_tabs', JSON.stringify(realUnique));
-            }
+            processAndSetTabs(tabs);
           }
         });
+      } else if (typeof window !== 'undefined') {
+        window.postMessage({ type: 'SYNCTAB_QUERY_TABS' }, '*');
       }
     } catch (e) {
       console.warn("Failed to query chrome tabs, keeping mock tabs:", e);
     }
-  }, []);
+  }, [processAndSetTabs]);
 
   useEffect(() => {
     refreshOpenTabs();
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.type === 'SYNCTAB_TABS_RESPONSE') {
+        if (Array.isArray(event.data.tabs)) {
+          processAndSetTabs(event.data.tabs);
+        }
+      } else if (event.data && event.data.type === 'SYNCTAB_TABS_UPDATED') {
+        refreshOpenTabs();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+
     try {
       const hasChromeTabs = typeof window !== 'undefined' && 
                             (window as any).chrome && 
@@ -225,6 +237,7 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
         tabsAPI.onActivated?.addListener(listener);
 
         return () => {
+          window.removeEventListener('message', handleMessage);
           try {
             tabsAPI.onCreated?.removeListener(listener);
             tabsAPI.onUpdated?.removeListener(listener);
@@ -239,7 +252,11 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
     } catch (e) {
       console.warn("Failed to set up chrome tab event listeners:", e);
     }
-  }, [refreshOpenTabs]);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [refreshOpenTabs, processAndSetTabs]);
 
   // Click outside to close column dropdown menu
   useEffect(() => {

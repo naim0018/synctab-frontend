@@ -38,13 +38,16 @@ export const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
     <div className="relative" style={{ display: 'inline-block' }}>
       {/* User Profile Avatar with dropdown trigger */}
       <button 
-        className="widget-circle-btn widget-profile-btn" 
+        className="widget-profile-pill widget-profile-btn" 
         onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-        style={{ position: 'relative', padding: 0, overflow: 'visible', background: 'transparent', border: 'none', cursor: 'pointer' }}
       >
-        <div style={{ position: 'relative', display: 'inline-flex' }}>
+        <div className="profile-pill-avatar-wrapper">
           <AvatarDisplay avatar={currentUser.avatar} name={currentUser.name} size={36} />
           <span className={`widget-status-dot ${currentUser.status.toLowerCase().replace(' ', '')}`} />
+        </div>
+        <div className="profile-pill-info">
+          <span className="profile-pill-name">{currentUser.name}</span>
+          <span className="profile-pill-email">{currentUser.email || 'm.johnson@finex.com'}</span>
         </div>
       </button>
 

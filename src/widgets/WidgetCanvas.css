@@ -573,7 +573,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: 70vh;
+  flex: 1;
   overflow-y: auto;
 }
 
@@ -860,6 +860,94 @@
 
 .wc-panel-sub-label {
   flex: 1;
+}
+
+/* Sleek Tabs */
+.bm-modal-tabs {
+  display: flex;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+
+.bm-modal-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bm-modal-tab-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.bm-modal-tab-btn.active {
+  color: #111827;
+  background: #ecc94b;
+  box-shadow: 0 2px 8px rgba(236, 201, 75, 0.3);
+}
+
+.bm-tab-icon {
+  font-size: 14px;
+}
+
+/* Custom view mode switch style */
+.bm-segmented-control {
+  display: flex;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.bm-segmented-btn {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bm-segmented-btn:hover {
+  color: #fff;
+}
+
+.bm-segmented-btn.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ecc94b;
+  border: 1px solid rgba(236, 201, 75, 0.15);
+}
+
+/* Card Wrapper */
+.bm-setup-card {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 

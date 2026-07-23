@@ -1,7 +1,7 @@
-import { Bookmark as BookmarkIcon, Sun, Moon } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Bookmark as BookmarkIcon } from 'lucide-react';
 import BookmarkModal from './components/common/BookmarkModal';
 import CustomPageModal from './components/common/CustomPageModal';
-import { ProfileDropdown } from './components/common/ProfileDropdown';
 import { SidebarMenu } from './components/common/SidebarMenu';
 
 // Decomposed page containers
@@ -20,6 +20,25 @@ import IssuePage from './pages/Issue/IssuePage';
 
 function App() {
   const state = useSyncTabState();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  const combinedMenuItems = useMemo(() => {
+    // Keep 'dashboard' at the top, then bookmarks, notes, tasks, reminders, chat, issues, customize, widgets, edit_widgets.
+    // Let's filter customPages or others out, or keep them if they are in the list.
+    const all = [...state.leftMenuItems, ...state.rightMenuItems];
+    const unique = Array.from(new Set(all));
+    
+    // Sort or order logically so it looks beautiful
+    const order = ['dashboard', 'bookmarks', 'notes', 'tasks', 'reminders', 'chat', 'issues', 'customize', 'widgets', 'edit_widgets'];
+    return unique.sort((a, b) => {
+      const idxA = order.indexOf(a);
+      const idxB = order.indexOf(b);
+      if (idxA === -1 && idxB === -1) return 0;
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
+  }, [state.leftMenuItems, state.rightMenuItems]);
 
   const {
     activeTab,
@@ -31,17 +50,10 @@ function App() {
     customPages,
     isCustomPageModalOpen,
     setIsCustomPageModalOpen,
-    leftMenuItems,
-    rightMenuItems,
     isWidgetEditing,
     setIsWidgetEditing,
     isWidgetPanelOpen,
     setIsWidgetPanelOpen,
-    draggingOverSide,
-    setDraggingOverSide,
-    handleMenuDragStart,
-    handleSidebarDrop,
-    handleMenuDropOnItem,
     currentWallpaper,
     setCurrentWallpaper,
     wallpapers,
@@ -148,62 +160,30 @@ function App() {
   }
 
   return (
-    <div className="app-container app-root">
-      {/* Left Edge Navigation */}
+    <div className={`app-container app-root ${isSidebarCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'}`}>
+      {/* Redesigned Single Left Sidebar */}
       <SidebarMenu
-        side="left"
-        menuItems={leftMenuItems}
+        menuItems={combinedMenuItems}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isWidgetEditing={isWidgetEditing}
         setIsWidgetEditing={setIsWidgetEditing}
         isWidgetPanelOpen={isWidgetPanelOpen}
         setIsWidgetPanelOpen={setIsWidgetPanelOpen}
-        draggingOverSide={draggingOverSide}
-        setDraggingOverSide={setDraggingOverSide}
         customPages={customPages}
         visibleTabs={visibleTabs}
-        handleMenuDragStart={handleMenuDragStart}
-        handleSidebarDrop={handleSidebarDrop}
-        handleMenuDropOnItem={handleMenuDropOnItem}
         setIsCustomPageModalOpen={setIsCustomPageModalOpen}
-      />
-
-      {/* Right Edge Navigation */}
-      <SidebarMenu
-        side="right"
-        menuItems={rightMenuItems}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        isWidgetEditing={isWidgetEditing}
-        setIsWidgetEditing={setIsWidgetEditing}
-        isWidgetPanelOpen={isWidgetPanelOpen}
-        setIsWidgetPanelOpen={setIsWidgetPanelOpen}
-        draggingOverSide={draggingOverSide}
-        setDraggingOverSide={setDraggingOverSide}
-        customPages={customPages}
-        visibleTabs={visibleTabs}
-        handleMenuDragStart={handleMenuDragStart}
-        handleSidebarDrop={handleSidebarDrop}
-        handleMenuDropOnItem={handleMenuDropOnItem}
+        isCollapsed={isSidebarCollapsed}
+        setIsCollapsed={setIsSidebarCollapsed}
+        currentUser={currentUser}
+        handleStatusChange={handleStatusChange}
+        handleLogout={handleLogout}
+        isDarkMode={isDarkMode}
+        setIsDarkMode={setIsDarkMode}
       />
 
       {/* Main content area */}
       <main className={`main-content ${activeTab === 'dashboard' || customPages.some(p => p.id === activeTab) ? 'dashboard-mode' : ''}`}>
-        {/* Top Right Quick Widgets */}
-        <div className="top-right-widgets">
-          {/* Theme Toggle Button */}
-          <button className="widget-circle-btn" onClick={() => setIsDarkMode(!isDarkMode)}>
-            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
-          {/* Profile Dropdown */}
-          <ProfileDropdown
-            currentUser={currentUser}
-            handleStatusChange={handleStatusChange}
-            handleLogout={handleLogout}
-          />
-        </div>
 
         <>
           {/* A. DASHBOARD / CUSTOM PAGES VIEW */}

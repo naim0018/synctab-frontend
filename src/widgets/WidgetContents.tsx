@@ -606,11 +606,18 @@ export const BookmarksWidget: React.FC<{
     return (modeVal as any) || 'icons';
   });
 
-  const [dataSource, setDataSource] = useState<'custom' | 'top_sites' | 'recently_closed' | 'recent_top_sites'>(() => {
+  const [dataSource, setDataSource] = useState<'custom' | 'top_sites' | 'recently_closed' | 'recent_top_sites' | 'open_tabs'>(() => {
     let sourceVal = '';
     if (config && typeof config[`synctab_bm_source_${widgetId}`] === 'string') {
       sourceVal = config[`synctab_bm_source_${widgetId}`];
-    } else {
+    } else if (config && typeof config.viewMode === 'string') {
+      const vm = config.viewMode;
+      if (['open_tabs', 'top_sites', 'recently_closed', 'bookmarks_list'].includes(vm)) {
+        sourceVal = vm === 'bookmarks_list' ? 'custom' : vm;
+      }
+    }
+
+    if (!sourceVal) {
       sourceVal = localStorage.getItem(`synctab_bm_source_${widgetId}`) || '';
     }
 
@@ -626,7 +633,7 @@ export const BookmarksWidget: React.FC<{
       oldMode = localStorage.getItem(`synctab_bm_mode_${widgetId}`) || '';
     }
 
-    if (['top_sites', 'recently_closed', 'recent_top_sites'].includes(oldMode)) {
+    if (['top_sites', 'recently_closed', 'recent_top_sites', 'open_tabs'].includes(oldMode)) {
       return oldMode as any;
     }
     return 'custom';
@@ -666,32 +673,53 @@ export const BookmarksWidget: React.FC<{
   const [recentlyClosed, setRecentlyClosed] = useState<Array<{ id: string; title: string; url: string }>>(() => recentlyClosedList);
   const [recentTopSites, setRecentTopSites] = useState<Array<{ id: string; title: string; url: string }>>(() => recentTopSitesList);
 
-  const [openTabs, setOpenTabs] = useState<Array<{ title: string; url: string }>>(() => {
+  const [openTabs, setOpenTabs] = useState<Array<{ id: string; title: string; url: string }>>(() => {
     try {
       const saved = localStorage.getItem('synctab_recent_tabs');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((t: any) => ({ title: t.title, url: t.url }));
+          return parsed.map((t: any, idx: number) => ({ id: t.id || `tab_${idx}`, title: t.title, url: t.url }));
         }
       }
     } catch {}
     return [
-      { title: '(1) Angular', url: 'https://angular.io' },
-      { title: 'Unsplash - Beautiful Free Images & Pictures', url: 'https://unsplash.com' },
-      { title: 'Tabm Dashboard', url: 'https://tabm.co' },
-      { title: 'Vitech Systems', url: 'https://vitech.com' },
-      { title: 'From C to WebAssembly', url: 'https://fromc.org' },
-      { title: 'YouTube', url: 'https://youtube.com' },
-      { title: 'Pexels - Free Stock Photos', url: 'https://pexels.com' },
-      { title: 'GitHub - naim0018/SyncTab', url: 'https://github.com/naim0018/SyncTab' },
-      { title: 'Glance Dev Tools', url: 'https://glance.intl' },
-      { title: 'Google', url: 'https://google.com' },
-      { title: '(4) ChatGPT', url: 'https://chatgpt.com' },
-      { title: 'Google Translate', url: 'https://translate.google.com' },
-      { title: 'frontend - SyncTab Dev', url: 'http://localhost:5173' }
+      { id: 't1', title: '(1) Angular', url: 'https://angular.io' },
+      { id: 't2', title: 'Unsplash - Beautiful Free Images & Pictures', url: 'https://unsplash.com' },
+      { id: 't3', title: 'Tabm Dashboard', url: 'https://tabm.co' },
+      { id: 't4', title: 'Vitech Systems', url: 'https://vitech.com' },
+      { id: 't5', title: 'From C to WebAssembly', url: 'https://fromc.org' },
+      { id: 't6', title: 'YouTube', url: 'https://youtube.com' },
+      { id: 't7', title: 'Pexels - Free Stock Photos', url: 'https://pexels.com' },
+      { id: 't8', title: 'GitHub - naim0018/SyncTab', url: 'https://github.com/naim0018/SyncTab' },
+      { id: 't9', title: 'Glance Dev Tools', url: 'https://glance.intl' },
+      { id: 't10', title: 'Google', url: 'https://google.com' },
+      { id: 't11', title: '(4) ChatGPT', url: 'https://chatgpt.com' },
+      { id: 't12', title: 'Google Translate', url: 'https://translate.google.com' },
+      { id: 't13', title: 'frontend - SyncTab Dev', url: 'http://localhost:5173' }
     ];
   });
+
+  const processAndSetTabs = useCallback((tabs: any[]) => {
+    const formatted = tabs
+      .filter(t => {
+        if (!t || !t.url || !t.title) return false;
+        const u = t.url.toLowerCase();
+        return !u.startsWith('chrome://') && 
+               !u.startsWith('chrome-extension://') && 
+               !u.startsWith('about:') && 
+               !u.startsWith('edge://');
+      })
+      .map((t, idx) => ({
+        id: t.id?.toString() || `tab_${idx}_${Date.now()}`,
+        title: t.title || '',
+        url: t.url || ''
+      }));
+    
+    if (formatted.length > 0) {
+      setOpenTabs(formatted);
+    }
+  }, []);
 
   const refreshOpenTabs = useCallback(() => {
     try {
@@ -703,37 +731,16 @@ export const BookmarksWidget: React.FC<{
       ) {
         (window as any).chrome.tabs.query({}, (tabs: any[]) => {
           if (Array.isArray(tabs)) {
-            const formatted = tabs
-              .filter(t => t && t.url && t.title)
-              .map(t => ({
-                title: t.title || '',
-                url: t.url || ''
-              }));
-            
-            const realUnique: Array<{ title: string; url: string }> = [];
-            const realSeen = new Set<string>();
-            for (const tab of formatted) {
-              let normUrl = tab.url.toLowerCase();
-              try {
-                const u = new URL(tab.url);
-                normUrl = (u.origin + u.pathname).toLowerCase().replace(/\/$/, '');
-              } catch (e) {}
-              
-              if (!realSeen.has(normUrl)) {
-                realSeen.add(normUrl);
-                realUnique.push(tab);
-              }
-            }
-            if (realUnique.length > 0) {
-              setOpenTabs(realUnique);
-            }
+            processAndSetTabs(tabs);
           }
         });
+      } else if (typeof window !== 'undefined') {
+        window.postMessage({ type: 'SYNCTAB_QUERY_TABS' }, '*');
       }
     } catch (e) {
       console.warn("Failed to query chrome tabs, keeping mock tabs:", e);
     }
-  }, []);
+  }, [processAndSetTabs]);
 
   const refreshTopSites = useCallback(() => {
     try {
@@ -856,6 +863,19 @@ export const BookmarksWidget: React.FC<{
 
   useEffect(() => {
     refreshOpenTabs();
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.type === 'SYNCTAB_TABS_RESPONSE') {
+        if (Array.isArray(event.data.tabs)) {
+          processAndSetTabs(event.data.tabs);
+        }
+      } else if (event.data && event.data.type === 'SYNCTAB_TABS_UPDATED') {
+        refreshOpenTabs();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+
     try {
       const hasChromeTabs = typeof window !== 'undefined' && 
                             (window as any).chrome && 
@@ -885,6 +905,7 @@ export const BookmarksWidget: React.FC<{
         }
 
         return () => {
+          window.removeEventListener('message', handleMessage);
           try {
             tabsAPI.onCreated?.removeListener(listener);
             tabsAPI.onUpdated?.removeListener(listener);
@@ -899,7 +920,11 @@ export const BookmarksWidget: React.FC<{
     } catch (e) {
       console.warn("Failed to set up chrome tab event listeners:", e);
     }
-  }, [refreshOpenTabs]);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [refreshOpenTabs, processAndSetTabs]);
 
   const handleAddFromOpenTab = (tab: { title: string; url: string }) => {
     if (localBookmarks.some(b => b.url === tab.url)) return;
@@ -1211,6 +1236,8 @@ export const BookmarksWidget: React.FC<{
     }
 
     switch (dataSource) {
+      case 'open_tabs':
+        return openTabs;
       case 'top_sites':
         return topSites;
       case 'recently_closed':
@@ -1255,10 +1282,17 @@ export const BookmarksWidget: React.FC<{
       }}
     >
       {/* Optional List Title / Count Header */}
-      {(powerListTitle || showCount) && (viewMode === 'icons' || viewMode === 'list') && !activeFolderId && (
-        <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', justifyContent: 'space-between', padding: '0 4px' }}>
-          <span>🔖 {powerListTitle || 'Bookmarks'}</span>
-          {showCount && <span>({localBookmarks.length})</span>}
+      {(viewMode === 'icons' || viewMode === 'list') && !activeFolderId && (
+        <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'rgba(255, 255, 255, 0.85)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.6px', display: 'flex', justifyContent: 'space-between', padding: '0 4px' }}>
+          <span>
+            🔖 {powerListTitle || (
+              dataSource === 'open_tabs' ? 'Open Tabs' :
+              dataSource === 'top_sites' ? 'Top Sites' :
+              dataSource === 'recently_closed' ? 'Recently Closed' :
+              'Bookmarks'
+            )}
+          </span>
+          {showCount && <span style={{ opacity: 0.7, fontSize: '10px' }}>({getActiveItems().length})</span>}
         </div>
       )}
       
@@ -1466,338 +1500,247 @@ export const BookmarksWidget: React.FC<{
       {/* ── BOOKMARKS SETUP MODAL ── */}
       {showSetupModal && createPortal(
         <div className="bm-modal-overlay" onClick={() => setShowSetupModal(false)}>
-          <div className="bm-modal-container" onClick={e => e.stopPropagation()}>
+          <div className="bm-modal-container" style={{ width: '700px', height: '560px', maxHeight: 'calc(100vh - 40px)' }} onClick={e => e.stopPropagation()}>
             <div className="bm-modal-header">
-              <div className="bm-modal-title">Bookmarks setup | visual | on click</div>
-              <div style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '16px' }} onClick={() => setShowSetupModal(false)}>✕</div>
+              <div className="bm-modal-title">Bookmarks Widget Settings</div>
+              <div style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }} onClick={() => setShowSetupModal(false)}>✕</div>
             </div>
 
             <div className="bm-modal-body">
-              {/* Row 1: View Mode & Search */}
-              <div className="bm-modal-row">
-                <div className="bm-modal-group">
-                  <div className="bm-modal-label">View as</div>
-                  <div className="bm-modal-options" style={{ display: 'flex', gap: '16px' }}>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="viewAsFormat" 
-                        checked={viewMode === 'icons'} 
-                        onChange={() => setViewMode('icons')} 
-                      />
-                      Icons
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="viewAsFormat" 
-                        checked={viewMode === 'list'} 
-                        onChange={() => setViewMode('list')} 
-                      />
-                      List
-                    </label>
-                  </div>
-                </div>
-
-                <div className="bm-modal-group">
-                  <div className="bm-modal-label">Data Source</div>
-                  <div className="bm-modal-options" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px' }}>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="bmDataSource" 
-                        checked={dataSource === 'custom'} 
-                        onChange={() => setDataSource('custom')} 
-                      />
-                      Custom Bookmarks
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="bmDataSource" 
-                        checked={dataSource === 'top_sites'} 
-                        onChange={() => setDataSource('top_sites')} 
-                      />
-                      Top Sites
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="bmDataSource" 
-                        checked={dataSource === 'recently_closed'} 
-                        onChange={() => setDataSource('recently_closed')} 
-                      />
-                      Recently Closed
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="bmDataSource" 
-                        checked={dataSource === 'recent_top_sites'} 
-                        onChange={() => setDataSource('recent_top_sites')} 
-                      />
-                      Recent & Top Sites
-                    </label>
-                  </div>
-                </div>
-
-                <div className="bm-modal-group">
-                  <div className="bm-modal-label">Searching in Bookmarks</div>
-                  <select 
-                    value={searchInBm} 
-                    onChange={e => setSearchInBm(e.target.value)}
-                    className="bm-modal-select"
-                  >
-                    <option value="Disabled">Disabled</option>
-                    <option value="Enabled">Enabled</option>
-                  </select>
-                </div>
-
-                <div className="bm-modal-group" style={{ justifyContent: 'flex-end', height: '42px' }}>
-                  <label className="bm-modal-checkbox-label">
-                    <input 
-                      type="checkbox" 
-                      checked={showCount} 
-                      onChange={e => setShowCount(e.target.checked)} 
-                    />
-                    Show Number of Bookmarks
-                  </label>
+              {/* Row 1: Data Source Tabs */}
+              <div className="bm-modal-group">
+                <div className="bm-modal-label">Data Source</div>
+                <div className="bm-modal-tabs">
+                  {[
+                    { id: 'open_tabs', label: 'Open Tabs', icon: '🌐' },
+                    { id: 'custom', label: 'Custom List', icon: '🔖' },
+                    { id: 'top_sites', label: 'Top Sites', icon: '⭐' },
+                    { id: 'recently_closed', label: 'Recents', icon: '🕒' }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={`bm-modal-tab-btn ${dataSource === tab.id ? 'active' : ''}`}
+                      onClick={() => setDataSource(tab.id as any)}
+                    >
+                      <span className="bm-tab-icon">{tab.icon}</span>
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Row 2: Manage/Edit Bookmarks & Open Tabs */}
-              <div style={{ display: 'flex', gap: '20px', width: '100%', boxSizing: 'border-box' }}>
-                <div className="bm-modal-group" style={{ flex: 1, minWidth: 0 }}>
-                  <div className="bm-modal-label">Edit Bookmarks</div>
-                  <div className="bm-edit-list-container" style={{ minWidth: 'auto', height: '180px', maxHeight: '180px' }}>
-                    {localBookmarks.map(b => (
-                      <div key={b.id} className="bm-edit-item">
-                        <div className="bm-edit-item-info">
-                          <img src={getFavicon(b.url)} alt="" width={14} height={14} />
-                          <span style={{ fontWeight: 600 }}>{b.title}</span>
-                          <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>({getDomain(b.url)})</span>
-                        </div>
-                        <button 
-                          className="bm-edit-delete-btn" 
-                          onClick={() => handleDeleteBookmark(b.id)}
-                          title="Delete Bookmark"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                    {localBookmarks.length === 0 && (
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: 8, textAlign: 'center' }}>No custom bookmarks. Add one below.</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bm-modal-group" style={{ flex: 1, minWidth: 0 }}>
-                  <div className="bm-modal-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                    <span>Quick Add from Open Tabs</span>
-                    <span style={{ fontSize: '9px', background: 'rgba(255, 255, 255, 0.1)', color: 'rgba(255, 255, 255, 0.6)', padding: '2px 6px', borderRadius: '10px', fontWeight: 'normal' }}>{openTabs.length} Tabs Open</span>
-                  </div>
-                  <div className="bm-edit-list-container" style={{ minWidth: 'auto', height: '180px', maxHeight: '180px', background: 'rgba(255,255,255,0.01)' }}>
-                    {openTabs.map((tab, idx) => {
-                      const isAdded = localBookmarks.some(b => b.url === tab.url);
-                      return (
-                        <div 
-                          key={idx} 
-                          className="bm-edit-item" 
-                          style={{ 
-                            cursor: isAdded ? 'default' : 'pointer', 
-                            opacity: isAdded ? 0.6 : 1,
-                            transition: 'all 0.15s ease',
-                            padding: '6px 10px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            background: 'rgba(255, 255, 255, 0.02)',
-                            borderRadius: '6px',
-                            border: '1px solid rgba(255, 255, 255, 0.02)'
-                          }}
-                          onClick={() => !isAdded && handleAddFromOpenTab(tab)}
-                          title={isAdded ? "Already added" : "Click to add as bookmark icon"}
-                        >
-                          <div className="bm-edit-item-info" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', overflow: 'hidden' }}>
-                            <img src={getFavicon(tab.url)} alt="" width={14} height={14} style={{ borderRadius: '4px', flexShrink: 0 }} />
-                            <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>{tab.title}</span>
-                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '9px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '90px' }}>{new URL(tab.url).hostname}</span>
-                          </div>
-                          <button 
-                            className="bm-edit-add-btn" 
-                            style={{ 
-                              background: isAdded ? 'transparent' : 'rgba(236, 201, 75, 0.15)', 
-                              border: 'none', 
-                              color: isAdded ? '#10b981' : '#ecc94b', 
-                              borderRadius: '4px',
-                              padding: '2px 8px',
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              cursor: isAdded ? 'default' : 'pointer'
-                            }}
-                          >
-                            {isAdded ? '✓ Added' : '＋ Add'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 3: Add Bookmark Form */}
-              <form onSubmit={handleAddBookmark} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', background: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                <div className="bm-modal-group" style={{ flex: 1.2 }}>
-                  <div className="bm-modal-label" style={{ fontSize: '9px' }}>Link Title (Optional)</div>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. My Website" 
-                    value={newTitle} 
-                    onChange={e => setNewTitle(e.target.value)}
-                    className="bm-modal-input"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <div className="bm-modal-group" style={{ flex: 2 }}>
-                  <div className="bm-modal-label" style={{ fontSize: '9px' }}>URL</div>
-                  <input 
-                    type="text" 
-                    placeholder="example.com" 
-                    value={newUrl} 
-                    onChange={e => setNewUrl(e.target.value)}
-                    required
-                    className="bm-modal-input"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                {powerAllowChangeIcons && (
-                  <div className="bm-modal-group" style={{ flex: 1 }}>
-                    <div className="bm-modal-label" style={{ fontSize: '9px' }}>Icon (Emoji/URL)</div>
+              {/* Row 2: Basic Display Controls */}
+              <div className="bm-setup-card">
+                <div style={{ display: 'flex', gap: '20px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <div className="bm-modal-group" style={{ flex: 1, minWidth: '130px' }}>
+                    <div className="bm-modal-label">List Title</div>
                     <input 
                       type="text" 
-                      placeholder="e.g. ⭐ or URL" 
-                      value={newIcon} 
-                      onChange={e => setNewIcon(e.target.value)}
-                      className="bm-modal-input"
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                )}
-                <button type="submit" className="bm-modal-btn-primary" style={{ height: '32px' }}>
-                  Add Link
-                </button>
-              </form>
-
-              {/* Row 4: Appends & Integrations */}
-              <div className="bm-modal-row">
-                <div className="bm-modal-group">
-                  <div className="bm-modal-label">Append Chrome Top Sites</div>
-                  <div className="bm-modal-options">
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="topSites" 
-                        checked={appendTopSites === 'yes'} 
-                        onChange={() => setAppendTopSites('yes')} 
-                      />
-                      Yes
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="topSites" 
-                        checked={appendTopSites === 'folder'} 
-                        onChange={() => setAppendTopSites('folder')} 
-                      />
-                      Folder
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="topSites" 
-                        checked={appendTopSites === 'no'} 
-                        onChange={() => setAppendTopSites('no')} 
-                      />
-                      No
-                    </label>
-                  </div>
-                </div>
-
-                <div className="bm-modal-group">
-                  <div className="bm-modal-label">Append Recently Closed</div>
-                  <div className="bm-modal-options">
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="recentClosed" 
-                        checked={appendRecent === 'yes'} 
-                        onChange={() => setAppendRecent('yes')} 
-                      />
-                      Yes
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="recentClosed" 
-                        checked={appendRecent === 'folder'} 
-                        onChange={() => setAppendRecent('folder')} 
-                      />
-                      Folder
-                    </label>
-                    <label className="bm-modal-radio-label">
-                      <input 
-                        type="radio" 
-                        name="recentClosed" 
-                        checked={appendRecent === 'no'} 
-                        onChange={() => setAppendRecent('no')} 
-                      />
-                      No
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 5: Power Features */}
-              <div className="bm-power-features">
-                <div className="bm-power-header">
-                  ⚡ Power features <span style={{ cursor: 'pointer', opacity: 0.8 }}>ⓘ</span>
-                </div>
-                <div className="bm-modal-row" style={{ gap: 20 }}>
-                  <div className="bm-modal-group">
-                    <div className="bm-modal-label" style={{ fontSize: '9px' }}>List Title</div>
-                    <input 
-                      type="text" 
-                      placeholder="List Title" 
+                      placeholder="e.g. My Tabs" 
                       value={powerListTitle} 
                       onChange={e => setPowerListTitle(e.target.value)}
                       className="bm-modal-input" 
+                      style={{ width: '100%', boxSizing: 'border-box' }}
                     />
                   </div>
+
+                  <div className="bm-modal-group" style={{ minWidth: '120px' }}>
+                    <div className="bm-modal-label">View Mode</div>
+                    <div className="bm-segmented-control">
+                      <button 
+                        type="button" 
+                        className={`bm-segmented-btn ${viewMode === 'icons' ? 'active' : ''}`}
+                        onClick={() => setViewMode('icons')}
+                      >
+                        Grid Icons
+                      </button>
+                      <button 
+                        type="button" 
+                        className={`bm-segmented-btn ${viewMode === 'list' ? 'active' : ''}`}
+                        onClick={() => setViewMode('list')}
+                      >
+                        List
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '4px' }}>
                   <label className="bm-modal-checkbox-label">
                     <input 
                       type="checkbox" 
                       checked={powerOpenNewTab} 
                       onChange={e => setPowerOpenNewTab(e.target.checked)} 
                     />
-                    Open all bookmarks in new tab
+                    Open links in new tab
                   </label>
                   <label className="bm-modal-checkbox-label">
                     <input 
                       type="checkbox" 
-                      checked={powerAllowChangeIcons} 
-                      onChange={e => setPowerAllowChangeIcons(e.target.checked)} 
+                      checked={showCount} 
+                      onChange={e => setShowCount(e.target.checked)} 
                     />
-                    Allow to change icons
+                    Show count badge
                   </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="bm-modal-label" style={{ textTransform: 'none', margin: 0 }}>Search filter:</span>
+                    <select 
+                      value={searchInBm} 
+                      onChange={e => setSearchInBm(e.target.value)}
+                      className="bm-modal-select"
+                      style={{ padding: '3px 8px', minWidth: '90px' }}
+                    >
+                      <option value="Disabled">Disabled</option>
+                      <option value="Enabled">Enabled</option>
+                    </select>
+                  </div>
                 </div>
               </div>
+
+              {/* Row 3: Custom Bookmark Lists (Only shown for Custom List variant) */}
+              {dataSource === 'custom' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', gap: '16px', width: '100%', boxSizing: 'border-box' }}>
+                    <div className="bm-modal-group" style={{ flex: 1, minWidth: 0 }}>
+                      <div className="bm-modal-label">Manage Custom Bookmarks</div>
+                      <div className="bm-edit-list-container" style={{ minWidth: 'auto', height: '160px', maxHeight: '160px' }}>
+                        {localBookmarks.map(b => (
+                          <div key={b.id} className="bm-edit-item">
+                            <div className="bm-edit-item-info">
+                              <img src={getFavicon(b.url)} alt="" width={14} height={14} />
+                              <span style={{ fontWeight: 600 }}>{b.title}</span>
+                              <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '10px' }}>({getDomain(b.url)})</span>
+                            </div>
+                            <button 
+                              className="bm-edit-delete-btn" 
+                              onClick={() => handleDeleteBookmark(b.id)}
+                              title="Delete Bookmark"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        {localBookmarks.length === 0 && (
+                          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', padding: 8, textAlign: 'center', marginTop: '40px' }}>No custom bookmarks. Add one below.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bm-modal-group" style={{ flex: 1, minWidth: 0 }}>
+                      <div className="bm-modal-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <span>Quick Add from Open Tabs</span>
+                        <span style={{ fontSize: '9px', background: 'rgba(255, 255, 255, 0.1)', color: 'rgba(255, 255, 255, 0.6)', padding: '2px 6px', borderRadius: '10px', fontWeight: 'normal' }}>{openTabs.length} Tabs Open</span>
+                      </div>
+                      <div className="bm-edit-list-container" style={{ minWidth: 'auto', height: '160px', maxHeight: '160px', background: 'rgba(255,255,255,0.01)' }}>
+                        {openTabs.map((tab, idx) => {
+                          const isAdded = localBookmarks.some(b => b.url === tab.url);
+                          return (
+                            <div 
+                              key={idx} 
+                              className="bm-edit-item" 
+                              style={{ 
+                                cursor: isAdded ? 'default' : 'pointer', 
+                                opacity: isAdded ? 0.6 : 1,
+                                transition: 'all 0.15s ease',
+                                padding: '6px 10px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: 'rgba(255, 255, 255, 0.02)',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(255, 255, 255, 0.02)'
+                              }}
+                              onClick={() => !isAdded && handleAddFromOpenTab(tab)}
+                              title={isAdded ? "Already added" : "Click to add as bookmark icon"}
+                            >
+                              <div className="bm-edit-item-info" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', overflow: 'hidden' }}>
+                                <img src={getFavicon(tab.url)} alt="" width={14} height={14} style={{ borderRadius: '4px', flexShrink: 0 }} />
+                                <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '110px' }}>{tab.title}</span>
+                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '9px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80px' }}>{new URL(tab.url).hostname}</span>
+                              </div>
+                              <button 
+                                className="bm-edit-add-btn" 
+                                style={{ 
+                                  background: isAdded ? 'transparent' : 'rgba(236, 201, 75, 0.15)', 
+                                  border: 'none', 
+                                  color: isAdded ? '#10b981' : '#ecc94b', 
+                                  borderRadius: '4px',
+                                  padding: '2px 8px',
+                                  fontSize: '10px',
+                                  fontWeight: 600,
+                                  cursor: isAdded ? 'default' : 'pointer'
+                                }}
+                              >
+                                {isAdded ? '✓ Added' : '＋ Add'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Add Bookmark Form */}
+                  <form onSubmit={handleAddBookmark} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', background: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <div className="bm-modal-group" style={{ flex: 1.2 }}>
+                      <div className="bm-modal-label" style={{ fontSize: '9px' }}>Link Title (Optional)</div>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. My Website" 
+                        value={newTitle} 
+                        onChange={e => setNewTitle(e.target.value)}
+                        className="bm-modal-input"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className="bm-modal-group" style={{ flex: 2 }}>
+                      <div className="bm-modal-label" style={{ fontSize: '9px' }}>URL</div>
+                      <input 
+                        type="text" 
+                        placeholder="example.com" 
+                        value={newUrl} 
+                        onChange={e => setNewUrl(e.target.value)}
+                        required
+                        className="bm-modal-input"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    {powerAllowChangeIcons && (
+                      <div className="bm-modal-group" style={{ flex: 1 }}>
+                        <div className="bm-modal-label" style={{ fontSize: '9px' }}>Icon (Emoji/URL)</div>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. ⭐ or URL" 
+                          value={newIcon} 
+                          onChange={e => setNewIcon(e.target.value)}
+                          className="bm-modal-input"
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    )}
+                    <button type="submit" className="bm-modal-btn-primary" style={{ height: '32px' }}>
+                      Add Link
+                    </button>
+                  </form>
+
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                    <label className="bm-modal-checkbox-label">
+                      <input 
+                        type="checkbox" 
+                        checked={powerAllowChangeIcons} 
+                        onChange={e => setPowerAllowChangeIcons(e.target.checked)} 
+                      />
+                      Allow custom emojis/icons for bookmarks
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bm-modal-footer">
               <button className="bm-modal-btn-secondary" onClick={() => setShowSetupModal(false)}>CANCEL</button>
-              <button className="bm-modal-btn-secondary" onClick={handleSave}>SAVE</button>
-              <button className="bm-modal-btn-primary" onClick={handleSave}>SAVE & RUN</button>
+              <button className="bm-modal-btn-primary" onClick={handleSave}>SAVE CONFIGURATION</button>
             </div>
           </div>
         </div>,

@@ -8,20 +8,27 @@ import {
   Clock,
   Globe,
   Grid,
-  Move
+  Move,
+  ChevronLeft,
+  ChevronRight,
+  Zap,
+  X,
+  Sparkles,
+  Settings,
+  Sun,
+  Moon,
+  Bell
 } from 'lucide-react';
+import { ProfileDropdown } from './ProfileDropdown';
+import type { User } from '../../types';
 
 interface SidebarMenuProps {
-  side: 'left' | 'right';
-  menuItems: string[];
   activeTab: string;
   setActiveTab: (tab: string) => void;
   isWidgetEditing: boolean;
   setIsWidgetEditing: (editing: boolean) => void;
   isWidgetPanelOpen: boolean;
   setIsWidgetPanelOpen: (open: boolean) => void;
-  draggingOverSide: 'left' | 'right' | null;
-  setDraggingOverSide: (side: 'left' | 'right' | null) => void;
   customPages: { id: string; name: string }[];
   visibleTabs: {
     bookmarks: boolean;
@@ -30,29 +37,35 @@ interface SidebarMenuProps {
     reminders: boolean;
     chat: boolean;
   };
-  handleMenuDragStart: (e: React.DragEvent, id: string) => void;
-  handleSidebarDrop: (e: React.DragEvent, side: 'left' | 'right') => void;
-  handleMenuDropOnItem: (e: React.DragEvent, targetId: string, targetSide: 'left' | 'right') => void;
   setIsCustomPageModalOpen?: (open: boolean) => void;
+  isCollapsed: boolean;
+  setIsCollapsed: (collapsed: boolean) => void;
+  menuItems: string[];
+  currentUser: User | null;
+  handleStatusChange: (status: string) => Promise<void>;
+  handleLogout: () => void;
+  isDarkMode: boolean;
+  setIsDarkMode: (val: boolean) => void;
 }
 
 export const SidebarMenu: React.FC<SidebarMenuProps> = ({
-  side,
-  menuItems,
   activeTab,
   setActiveTab,
   isWidgetEditing,
   setIsWidgetEditing,
   isWidgetPanelOpen,
   setIsWidgetPanelOpen,
-  draggingOverSide,
-  setDraggingOverSide,
   customPages,
   visibleTabs,
-  handleMenuDragStart,
-  handleSidebarDrop,
-  handleMenuDropOnItem,
-  setIsCustomPageModalOpen
+  setIsCustomPageModalOpen,
+  isCollapsed,
+  setIsCollapsed,
+  menuItems,
+  currentUser,
+  handleStatusChange,
+  handleLogout,
+  isDarkMode,
+  setIsDarkMode,
 }) => {
   const getMenuItemDetails = (id: string) => {
     if (id.startsWith('page_')) {
@@ -60,32 +73,32 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
       if (!page) return null;
       return {
         label: page.name,
-        icon: <Plus size={20} />,
+        icon: <Plus size={18} />,
         visible: true,
       };
     }
 
     switch (id) {
       case 'dashboard':
-        return { label: 'Home', icon: <Globe size={20} />, visible: true };
+        return { label: 'Dashboard', icon: <Globe size={18} />, visible: true };
       case 'bookmarks':
-        return { label: 'Bookmarks', icon: <BookmarkIcon size={20} />, visible: visibleTabs.bookmarks };
+        return { label: 'Bookmarks', icon: <BookmarkIcon size={18} />, visible: visibleTabs.bookmarks };
       case 'notes':
-        return { label: 'Notes', icon: <FileText size={20} />, visible: visibleTabs.notes };
+        return { label: 'Notes', icon: <FileText size={18} />, visible: visibleTabs.notes };
       case 'customize':
-        return { label: 'Customize', icon: <Plus size={20} />, visible: true };
+        return { label: 'Customize', icon: <Settings size={18} />, visible: true };
       case 'widgets':
-        return { label: 'Widgets', icon: <Grid size={20} />, visible: true };
+        return { label: 'Widgets', icon: <Grid size={18} />, visible: true };
       case 'edit_widgets':
-        return { label: 'Edit Layout', icon: <Move size={20} />, visible: true };
+        return { label: 'Edit Layout', icon: <Move size={18} />, visible: true };
       case 'tasks':
-        return { label: 'Tasks', icon: <CheckSquare size={20} />, visible: visibleTabs.tasks };
+        return { label: 'Tasks', icon: <CheckSquare size={18} />, visible: visibleTabs.tasks };
       case 'reminders':
-        return { label: 'Reminders', icon: <Clock size={20} />, visible: visibleTabs.reminders };
+        return { label: 'Reminders', icon: <Clock size={18} />, visible: visibleTabs.reminders };
       case 'chat':
-        return { label: 'Chat', icon: <MessageSquare size={20} />, visible: visibleTabs.chat };
+        return { label: 'Chat', icon: <MessageSquare size={18} />, visible: visibleTabs.chat };
       case 'issues':
-        return { label: 'Issues', icon: <span style={{ fontSize: 18 }}>🐛</span>, visible: true };
+        return { label: 'Issues', icon: <span style={{ fontSize: 16 }}>🐛</span>, visible: true };
       default:
         return null;
     }
@@ -127,58 +140,118 @@ export const SidebarMenu: React.FC<SidebarMenuProps> = ({
     };
 
     return (
-      <div
+      <button
         key={id}
-        className="edge-menu-item-wrapper"
-        draggable
-        onDragStart={(e) => handleMenuDragStart(e, id)}
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onDrop={(e) => handleMenuDropOnItem(e, id, side)}
-        style={{ cursor: 'grab' }}
+        onClick={onClick}
+        className={`sidebar-menu-btn ${isActive ? 'active' : ''}`}
+        title={isCollapsed ? label : undefined}
       >
-        <button
-          onClick={onClick}
-          className={`edge-menu-btn ${isActive ? 'active' : ''}`}
-          title={label}
-        >
-          {icon}
-        </button>
-        <span className="edge-menu-label" style={{ maxWidth: '64px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {label}
-        </span>
-      </div>
+        <span className="sidebar-menu-icon">{icon}</span>
+        {!isCollapsed && <span className="sidebar-menu-label">{label}</span>}
+      </button>
     );
   };
 
+  const [showPromo, setShowPromo] = React.useState(true);
+
   return (
-    <div
-      className={`edge-menu ${side}-side ${draggingOverSide === side ? 'drag-over' : ''}`}
-      onDragOver={(e) => { e.preventDefault(); setDraggingOverSide(side); }}
-      onDragLeave={() => setDraggingOverSide(null)}
-      onDrop={(e) => handleSidebarDrop(e, side)}
-    >
-      <div className="edge-menu-items-inner">
+    <aside className={`sidebar-container ${isCollapsed ? 'collapsed' : ''}`}>
+      {/* Brand / Logo */}
+      <div className="sidebar-brand">
+        <div className="brand-icon-wrapper">
+          <Sparkles size={20} className="brand-logo-spark" />
+        </div>
+        {!isCollapsed && <span className="brand-title">SyncTab</span>}
+      </div>
+
+      {/* Navigation List */}
+      <nav className="sidebar-nav-list">
         {menuItems.map((id) => {
           const details = getMenuItemDetails(id);
           if (!details || !details.visible) return null;
           return renderMenuItem(id, details.label, details.icon);
         })}
 
-        {side === 'left' && setIsCustomPageModalOpen && (
-          <div className="edge-menu-item-wrapper">
-            <button
-              onClick={() => setIsCustomPageModalOpen(true)}
-              className="edge-menu-btn"
-              style={{ borderStyle: 'dashed', background: 'rgba(255, 255, 255, 0.03)' }}
-              title="Create Custom Page"
-            >
-              <Plus size={20} />
-            </button>
-            <span className="edge-menu-label">Add Page</span>
+        {setIsCustomPageModalOpen && (
+          <button
+            onClick={() => setIsCustomPageModalOpen(true)}
+            className="sidebar-menu-btn add-page-btn"
+            title={isCollapsed ? "Add Custom Page" : undefined}
+          >
+            <span className="sidebar-menu-icon">
+              <Plus size={18} />
+            </span>
+            {!isCollapsed && <span className="sidebar-menu-label">Add Page</span>}
+          </button>
+        )}
+      </nav>
+
+      {/* Promo Card ("Upgrade to Pro") */}
+      {!isCollapsed && showPromo && (
+        <div className="promo-card">
+          <button className="promo-close-btn" onClick={() => setShowPromo(false)}>
+            <X size={14} />
+          </button>
+          <div className="promo-badge">
+            <Zap size={14} />
+          </div>
+          <h4 className="promo-title">Upgrade to Pro!</h4>
+          <p className="promo-desc">Full financial insights with analytics and graphs.</p>
+          <button className="promo-action-btn">Upgrade now</button>
+        </div>
+      )}
+
+      {/* Footer Actions */}
+      <div className="sidebar-footer-actions">
+        {currentUser && (
+          <div className="sidebar-profile-wrapper">
+            <ProfileDropdown
+              currentUser={currentUser}
+              handleStatusChange={handleStatusChange}
+              handleLogout={handleLogout}
+            />
           </div>
         )}
+
+        <div className="sidebar-utility-row">
+          {/* Notification Button */}
+          <button className="sidebar-action-btn notification-btn" title="Notifications">
+            <span className="notification-icon-dot" />
+            <Bell size={18} />
+          </button>
+          
+          {/* Theme Toggle Button */}
+          <button className="sidebar-action-btn theme-toggle-btn" onClick={() => setIsDarkMode(!isDarkMode)} title="Toggle Theme">
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+
+          {/* Add Widget Button if on Dashboard */}
+          {(activeTab === 'dashboard' || customPages.some(p => p.id === activeTab)) && (
+            <button 
+              className="sidebar-action-btn add-widget-sidebar-btn"
+              onClick={() => {
+                const nextPanel = !isWidgetPanelOpen;
+                setIsWidgetPanelOpen(nextPanel);
+                if (nextPanel) setIsWidgetEditing(true);
+              }}
+              title="Add Widget"
+            >
+              <Plus size={18} />
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Collapse Toggle at Bottom */}
+      <button
+        className="sidebar-collapse-toggle"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
+        {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+        {!isCollapsed && <span className="toggle-label">Collapse sidebar</span>}
+      </button>
+    </aside>
   );
 };
+
 export default SidebarMenu;

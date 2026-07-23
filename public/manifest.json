@@ -14,5 +14,14 @@
   ],
   "host_permissions": [
     "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://localhost/*", "*://127.0.0.1/*"],
+      "js": ["content.js"]
+    }
   ]
 }

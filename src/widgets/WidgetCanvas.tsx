@@ -26,8 +26,9 @@ const getWidgetConfig = (type: string, id: string): Record<string, any> => {
     config[`synctab_countdown_${id}`] = localStorage.getItem(`synctab_countdown_${id}`);
     config[`synctab_countdown_${id}_title`] = localStorage.getItem(`synctab_countdown_${id}_title`);
   } else if (type === 'bookmarks') {
+    const source = localStorage.getItem(`synctab_bm_source_${id}`) || 'custom';
     config[`synctab_bm_mode_${id}`] = localStorage.getItem(`synctab_bm_mode_${id}`);
-    config[`synctab_bm_source_${id}`] = localStorage.getItem(`synctab_bm_source_${id}`);
+    config[`synctab_bm_source_${id}`] = source;
     config[`synctab_bm_search_${id}`] = localStorage.getItem(`synctab_bm_search_${id}`);
     config[`synctab_bm_show_count_${id}`] = localStorage.getItem(`synctab_bm_show_count_${id}`);
     config[`synctab_bm_append_top_${id}`] = localStorage.getItem(`synctab_bm_append_top_${id}`);
@@ -35,10 +36,16 @@ const getWidgetConfig = (type: string, id: string): Record<string, any> => {
     config[`synctab_bm_power_title_${id}`] = localStorage.getItem(`synctab_bm_power_title_${id}`);
     config[`synctab_bm_power_new_tab_${id}`] = localStorage.getItem(`synctab_bm_power_new_tab_${id}`);
     config[`synctab_bm_power_allow_change_icons_${id}`] = localStorage.getItem(`synctab_bm_power_allow_change_icons_${id}`);
-    try {
-      const bms = localStorage.getItem(`synctab_widget_bookmarks_${id}`);
-      config[`synctab_widget_bookmarks_${id}`] = bms ? JSON.parse(bms) : null;
-    } catch {
+    
+    // Only save custom bookmarks to backend if source is 'custom'
+    if (source === 'custom') {
+      try {
+        const bms = localStorage.getItem(`synctab_widget_bookmarks_${id}`);
+        config[`synctab_widget_bookmarks_${id}`] = bms ? JSON.parse(bms) : null;
+      } catch {
+        config[`synctab_widget_bookmarks_${id}`] = null;
+      }
+    } else {
       config[`synctab_widget_bookmarks_${id}`] = null;
     }
   }
@@ -334,12 +341,37 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
     const canvas = canvasRef.current;
     const cx = canvas ? (canvas.clientWidth / 2 - catalog.defaultW / 2) : 60;
     const cy = canvas ? (canvas.clientHeight / 2 - catalog.defaultH / 2) : 60;
+    const id = `w_${Date.now()}`;
+
+    // Initialize config in localStorage for bookmarks variants
+    if (type === 'bookmarks' && config) {
+      if (config.viewMode) {
+        let source = 'custom';
+        let mode = 'list';
+        if (config.viewMode === 'open_tabs') {
+          source = 'open_tabs';
+          mode = 'list';
+        } else if (config.viewMode === 'bookmarks_list') {
+          source = 'custom';
+          mode = 'list';
+        } else if (config.viewMode === 'top_sites') {
+          source = 'top_sites';
+          mode = 'list';
+        } else if (config.viewMode === 'recently_closed') {
+          source = 'recently_closed';
+          mode = 'list';
+        }
+        localStorage.setItem(`synctab_bm_source_${id}`, source);
+        localStorage.setItem(`synctab_bm_mode_${id}`, mode);
+      }
+    }
+
     const newWidget: PlacedWidget = {
-      id: `w_${Date.now()}`, type,
+      id, type,
       x: snapToGrid(Math.max(0, cx)),
       y: snapToGrid(Math.max(0, cy)),
       w: catalog.defaultW, h: catalog.defaultH,
-      config
+      config: getWidgetConfig(type, id)
     };
     save([...widgets, newWidget]);
     setIsPanelOpen(false);
@@ -741,11 +773,10 @@ const WidgetCanvas: React.FC<WidgetCanvasProps> = ({
                       {isExpanded && item.type === 'bookmarks' && (
                         <div className="wc-panel-sub-list">
                           {[
-                            { label: 'Bookmarks List', icon: '🔖', viewMode: 'list' },
-                            { label: 'Bookmarks Icons', icon: '🔖', viewMode: 'icons' },
+                            { label: 'Open Tabs', icon: '🌐', viewMode: 'open_tabs' },
+                            { label: 'New Bookmark List', icon: '🔖', viewMode: 'bookmarks_list' },
                             { label: 'Top Sites', icon: '⭐', viewMode: 'top_sites' },
-                            { label: 'Recently Closed', icon: '🕒', viewMode: 'recently_closed' },
-                            { label: 'Recent & Top Sites', icon: '🔖', viewMode: 'recent_top_sites' }
+                            { label: 'Recently Closed', icon: '🕒', viewMode: 'recently_closed' }
                           ].map(sub => (
                             <div
                               key={sub.viewMode}
