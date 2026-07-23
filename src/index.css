@@ -175,12 +175,30 @@
   transition: grid-template-columns 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.app-container.sidebar-expanded {
-  grid-template-columns: 280px 1fr;
+/* 2-column layout (for pages without right sidebar) */
+.app-container.no-right-sidebar.sidebar-expanded {
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
-.app-container.sidebar-collapsed {
-  grid-template-columns: 78px 1fr;
+.app-container.no-right-sidebar.sidebar-collapsed {
+  grid-template-columns: 78px minmax(0, 1fr);
+}
+
+/* 3-column layout (for Bookmarks page with right sidebar) */
+.app-container.right-sidebar-expanded.sidebar-expanded {
+  grid-template-columns: 280px minmax(0, 1fr) 280px !important;
+}
+
+.app-container.right-sidebar-expanded.sidebar-collapsed {
+  grid-template-columns: 78px minmax(0, 1fr) 280px !important;
+}
+
+.app-container.right-sidebar-collapsed.sidebar-expanded {
+  grid-template-columns: 280px minmax(0, 1fr) 78px !important;
+}
+
+.app-container.right-sidebar-collapsed.sidebar-collapsed {
+  grid-template-columns: 78px minmax(0, 1fr) 78px !important;
 }
 
 @media (max-width: 1200px) {

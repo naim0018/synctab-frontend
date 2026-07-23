@@ -445,6 +445,17 @@ export const SpacesSidebar: React.FC<SpacesSidebarProps> = ({
                 </div>
               );
             })}
+
+            {!isSidebarCollapsed && (
+              <button
+                type="button"
+                className="flex items-center justify-center gap-2 mt-3 px-3 py-2 rounded-lg border border-dashed border-white/15 hover:border-indigo-500/50 bg-white/5 hover:bg-indigo-500/10 text-slate-400 hover:text-indigo-300 text-xs font-semibold transition-all cursor-pointer w-full"
+                onClick={() => setShowAddSpaceInline(true)}
+              >
+                <Plus size={13} />
+                <span>Create New Folder</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
