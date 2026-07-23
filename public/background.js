@@ -22,6 +22,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true; // Keep sendResponse channel open for async query
   }
+
+  if (message.action === 'GET_BROWSER_BOOKMARKS') {
+    if (!chrome.bookmarks) {
+      sendResponse({ tree: [] });
+      return;
+    }
+    chrome.bookmarks.getTree((tree) => {
+      sendResponse({ tree: tree || [] });
+    });
+    return true;
+  }
 });
 
 // Listen for tab events and notify all active dashboard pages

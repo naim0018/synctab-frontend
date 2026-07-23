@@ -68,12 +68,23 @@ const getDomain = (url: string) => {
   }
 };
 
-export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefresh }) => {
+export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks: backendBookmarks, onRefresh }) => {
+  const [localBms, setLocalBms] = useState<BookmarkItem[]>([]);
+  const [pendingSyncBms, setPendingSyncBms] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    setLocalBms(backendBookmarks);
+  }, [backendBookmarks]);
+
+  const bookmarks = localBms;
+
   const [searchQuery, setSearchQuery] = useState('');
+  const [isTabsDrawerOpen, setIsTabsDrawerOpen] = useState(false);
   const [openColMenu, setOpenColMenu] = useState<string | null>(null);
   const [pendingScrollColumn, setPendingScrollColumn] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showAddForm, setShowAddForm] = useState<Record<string, boolean>>({});
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
 
   // Spaces & Columns State
   const [spaces, setSpaces] = useState(() => {
@@ -408,16 +419,36 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
         return;
       }
 
-      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
-      const hasBookmarks = typeof window !== 'undefined' && (window as any).chrome && (window as any).chrome.bookmarks;
-
       let browserBms: Array<{ title: string; url: string; folderName: string; position?: number }> = [];
+      let tree: any[] | null = null;
 
-      if (hasBookmarks) {
-        const tree = await new Promise<any[]>((resolve) => {
-          (window as any).chrome.bookmarks.getTree(resolve);
+      try {
+        tree = await new Promise<any[]>((resolve, reject) => {
+          const handler = (event: MessageEvent) => {
+            if (event.source !== window) return;
+            if (event.data && event.data.type === 'SYNCTAB_BOOKMARKS_RESPONSE') {
+              window.removeEventListener('message', handler);
+              resolve(event.data.tree || []);
+            }
+          };
+          window.addEventListener('message', handler);
+          window.postMessage({ type: 'SYNCTAB_QUERY_BOOKMARKS' }, '*');
+          
+          setTimeout(() => {
+            window.removeEventListener('message', handler);
+            reject(new Error('Extension response timeout'));
+          }, 1500);
         });
+      } catch (e) {
+        console.log("SyncTab: Extension bridge failed, checking direct chrome api...", e);
+        if (typeof window !== 'undefined' && (window as any).chrome && (window as any).chrome.bookmarks) {
+          tree = await new Promise<any[]>((resolve) => {
+            (window as any).chrome.bookmarks.getTree(resolve);
+          });
+        }
+      }
 
+      if (tree && tree.length > 0) {
         const folderIndices: Record<string, number> = {};
         const traverse = (node: any, currentFolder = 'General') => {
           if (node.url) {
@@ -445,9 +476,7 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
           }
         };
 
-        if (tree && tree.length > 0) {
-          traverse(tree[0]);
-        }
+        traverse(tree[0]);
       } else {
         const savedMock = localStorage.getItem('synctab_mock_browser_bookmarks');
         if (savedMock) {
@@ -465,13 +494,61 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
         }
       }
 
-      const dbBms = bookmarks.filter(b => {
+      const otherBms = backendBookmarks.filter(b => {
+        const [space] = parseCategory(b.category);
+        return space !== selectedSpaceId;
+      });
+
+      const syncedLocal = browserBms.map((bb, idx) => ({
+        id: `temp_${idx}_${Date.now()}`,
+        title: bb.title,
+        url: bb.url,
+        category: `${selectedSpaceId}/${bb.folderName}`,
+        clicks: 0,
+        isShared: false,
+        userId: '',
+        position: bb.position ?? 0
+      }));
+
+      setLocalBms([...otherBms, ...syncedLocal]);
+
+      const foundFolders = Array.from(new Set(browserBms.map(bb => bb.folderName)));
+      const currentCols = customColumns[selectedSpaceId] || [];
+      const mergedCols = Array.from(new Set([...foundFolders, ...currentCols, 'General']));
+      saveCustomColumns({
+        ...customColumns,
+        [selectedSpaceId]: mergedCols
+      });
+
+      setPendingSyncBms(browserBms);
+      await showAlert('Synced Locally', 'Bookmarks loaded from browser locally. Click "Save to Database" in the header to save changes.');
+    } catch (err) {
+      console.error('Sync failed:', err);
+      await showAlert('Sync Error', 'Synchronization failed. Please check the console.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSaveSyncToDatabase = async () => {
+    if (!pendingSyncBms) return;
+    setIsSyncing(true);
+    try {
+      const userStr = localStorage.getItem('synctab_user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      if (!user) {
+        await showAlert('Authentication Required', 'Please log in to save bookmarks.');
+        return;
+      }
+
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+      const dbBms = backendBookmarks.filter(b => {
         const [space] = parseCategory(b.category);
         return space === selectedSpaceId;
       });
 
-      const toUpload = browserBms.filter(bb => !dbBms.some(db => db.url === bb.url));
-      const toUpdate = browserBms.map(bb => {
+      const toUpload = pendingSyncBms.filter(bb => !dbBms.some(db => db.url === bb.url));
+      const toUpdate = pendingSyncBms.map(bb => {
         const existing = dbBms.find(db => db.url === bb.url);
         if (existing) {
           const expectedCategory = `${selectedSpaceId}/${bb.folderName}`;
@@ -510,60 +587,18 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
         )
       ]);
 
-      const toDownload = dbBms.filter(db => !browserBms.some(bb => bb.url === db.url));
-      if (toDownload.length > 0) {
-        if (hasBookmarks) {
-          for (const dbBm of toDownload) {
-            const [, colName] = parseCategory(dbBm.category);
-            let folderId = await new Promise<string>((resolve) => {
-              const actualFolderName = colName.includes(' ❯ ') ? colName.split(' ❯ ').pop()?.trim() || colName : colName;
-              (window as any).chrome.bookmarks.search({ title: actualFolderName }, (results: any[]) => {
-                const existingFolder = results.find(r => !r.url);
-                if (existingFolder) {
-                  resolve(existingFolder.id);
-                } else {
-                  (window as any).chrome.bookmarks.create({ parentId: '1', title: actualFolderName }, (newFolder: any) => {
-                    resolve(newFolder.id);
-                  });
-                }
-              });
-            });
+      // Remove deleted bookmarks
+      const toDelete = dbBms.filter(db => !pendingSyncBms.some(bb => bb.url === db.url));
+      await Promise.all(
+        toDelete.map(db => fetch(`${apiBase}/bookmarks/${db.id}`, { method: 'DELETE' }))
+      );
 
-            await new Promise<void>((resolve) => {
-              (window as any).chrome.bookmarks.create({
-                parentId: folderId,
-                title: dbBm.title,
-                url: dbBm.url
-              }, () => resolve());
-            });
-          }
-        } else {
-          const updatedMock = [...browserBms];
-          toDownload.forEach(dbBm => {
-            const [, colName] = parseCategory(dbBm.category);
-            updatedMock.push({
-              title: dbBm.title,
-              url: dbBm.url,
-              folderName: colName
-            });
-          });
-          localStorage.setItem('synctab_mock_browser_bookmarks', JSON.stringify(updatedMock));
-        }
-      }
-
-      const foundFolders = Array.from(new Set(browserBms.map(bb => bb.folderName)));
-      const currentCols = customColumns[selectedSpaceId] || [];
-      const mergedCols = Array.from(new Set([...foundFolders, ...currentCols, 'General']));
-      saveCustomColumns({
-        ...customColumns,
-        [selectedSpaceId]: mergedCols
-      });
-
+      await showAlert('Save Success', 'Bookmarks successfully saved to database!');
+      setPendingSyncBms(null);
       onRefresh();
-      await showAlert('Sync Success', 'Bookmarks successfully synchronized with browser!');
     } catch (err) {
-      console.error('Sync failed:', err);
-      await showAlert('Sync Error', 'Synchronization failed. Please check the console.');
+      console.error('Save failed:', err);
+      await showAlert('Save Error', 'Failed to save bookmarks to database.');
     } finally {
       setIsSyncing(false);
     }
@@ -1147,8 +1182,134 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
         document.body
       )}
 
-      {/* 1. LEFT SIDEBAR */}
+      {/* 2. MAIN CONTENT AREA */}
+      <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
+        <div 
+          className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden border-r" 
+          style={{ 
+            background: 'var(--bm-main-bg)', 
+            borderColor: 'var(--panel-border)'
+          }}
+        >
+          <div className="h-16 flex items-center justify-between px-6 border-b flex-shrink-0 bg-transparent" style={{ borderColor: 'var(--bm-border)' }}>
+            <div className="flex items-center gap-3" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="flex items-center gap-2 text-[15px] font-bold" style={{ color: 'var(--bm-text-main)' }}>
+                <span>{spaces.find((s: any) => s.id === selectedSpaceId)?.icon || '📁'}</span>
+                <span>{spaces.find((s: any) => s.id === selectedSpaceId)?.name || selectedSpaceId}</span>
+              </div>
+              {activeSpace?.isSyncSpace && (
+                selectedSpaceId === currentSyncSpaceId ? (
+                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium px-2 py-0.5 rounded-full" title="This space is designated to sync with this browser's bookmarks">
+                    ✓ Local Sync Active
+                  </span>
+                ) : (
+                  <button 
+                    className="text-[10px] bg-slate-950 hover:bg-slate-900 border border-white/5 text-slate-400 hover:text-white font-medium px-2 py-0.5 rounded-full transition-all cursor-pointer" 
+                    onClick={handleSetCurrentBrowserSyncSpace}
+                    title="Click to designate this space to sync with this browser's bookmarks"
+                  >
+                    Set as Local Sync
+                  </button>
+                )
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              {selectedSpaceId === currentSyncSpaceId ? (
+                <>
+                  <button 
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-black/10 dark:border-white/10 bg-transparent text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${isSyncing ? 'animate-pulse' : ''}`} 
+                    onClick={handleSyncBrowser}
+                    disabled={isSyncing}
+                    title="Synchronize browser bookmarks with SyncTab database"
+                  >
+                    <RefreshCw size={13} className={isSyncing ? 'spin animate-spin' : ''} />
+                    <span>{isSyncing ? 'Syncing...' : 'Sync with Browser'}</span>
+                  </button>
+                  <button 
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                      pendingSyncBms 
+                        ? 'bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-700 animate-pulse' 
+                        : 'bg-transparent border-black/10 dark:border-white/10 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                    }`}
+                    onClick={handleSaveSyncToDatabase}
+                    disabled={isSyncing || !pendingSyncBms}
+                    title={pendingSyncBms ? "Save locally synced browser changes to backend database" : "No pending browser sync changes to save"}
+                  >
+                    <span>Save to Database</span>
+                    {pendingSyncBms && <span className="w-1.5 h-1.5 bg-white rounded-full ml-0.5 animate-ping"></span>}
+                  </button>
+                </>
+              ) : activeSpace?.isSyncSpace ? (
+                <button 
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-black/10 dark:border-white/10 bg-transparent text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${isSyncing ? 'animate-pulse' : ''}`} 
+                  onClick={handleSyncCloudOnly}
+                  disabled={isSyncing}
+                  title="Fetch latest bookmarks from backend"
+                >
+                  <RefreshCw size={13} className={isSyncing ? 'spin animate-spin' : ''} />
+                  <span>{isSyncing ? 'Syncing...' : 'Sync'}</span>
+                </button>
+              ) : null}
+              <button className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 bg-transparent text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-semibold transition-all cursor-pointer">
+                <Share2 size={13} /> Share
+              </button>
+              <button 
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-black/10 dark:border-white/10 bg-transparent text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 text-xs font-semibold transition-all cursor-pointer"
+                onClick={() => setIsTabsDrawerOpen(true)}
+              >
+                Open tabs <span className="bg-black/5 dark:bg-white/10 px-1.5 py-0.2 rounded text-[10px] font-bold ml-1">{openTabs.length}</span>
+              </button>
+              <button className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-semibold transition-all cursor-pointer bg-indigo-600 border border-indigo-500 hover:bg-indigo-700" onClick={handleAddColumn}>
+                <Plus size={13} /> Add Column
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 flex gap-5 p-6 overflow-x-auto overflow-y-hidden items-start select-none bg-transparent" style={{ userSelect: ghost.visible ? 'none' : undefined }}>
+            {/* NORMAL BOOKMARK COLUMNS */}
+            {activeColumns.map(colName => {
+              const isAdding = showAddForm[colName] || false;
+              const list = (columnBookmarks[colName] || []).filter(b => b.id !== dragState.draggedId);
+              const isDraggingOver = dragState.overColName === colName;
+
+              return (
+                <BookmarkColumn
+                  key={colName}
+                  colName={colName}
+                  list={list}
+                  isAdding={isAdding}
+                  setIsAdding={(adding) => setShowAddForm(prev => ({ ...prev, [colName]: adding }))}
+                  isDraggingOver={isDraggingOver}
+                  dragState={dragState}
+                  selectedSpaceId={selectedSpaceId}
+                  currentSyncSpaceId={currentSyncSpaceId}
+                  openColMenu={openColMenu}
+                  setOpenColMenu={setOpenColMenu}
+                  editingColName={null} 
+                  setEditingColName={() => {}}
+                  editingColTempName=""
+                  setEditingColTempName={() => {}}
+                  handleRenameColumn={(name) => handleRenameColumn(colName, name)}
+                  handleDeleteColumn={handleDeleteColumn}
+                  openAllBookmarks={openAllBookmarks}
+                  handleColumnHeaderDrop={handleColumnHeaderDrop}
+                  handleDrawerTabDrop={handleDrawerTabDrop}
+                  handleAddBookmarkSubmit={handleAddBookmarkSubmit}
+                  ghost={ghost}
+                  onPointerDown={onPointerDown}
+                  onDeleteBookmark={handleDeleteBookmark}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 1. RIGHT SIDEBAR */}
       <SpacesSidebar
+        isCollapsed={isRightSidebarCollapsed}
+        setIsCollapsed={setIsRightSidebarCollapsed}
         spaces={spaces}
         selectedSpaceId={selectedSpaceId}
         onSelectSpace={setSelectedSpaceId}
@@ -1167,103 +1328,18 @@ export const BookmarksPage: React.FC<BookmarksPageProps> = ({ bookmarks, onRefre
         }}
       />
 
-      {/* 2. MAIN CONTENT AREA */}
-      <div className="flex-1 min-h-0 flex flex-col min-w-0 bg-[#08090d] border-l border-white/5">
-        <div className="h-16 flex items-center justify-between px-6 border-b border-white/5 flex-shrink-0 bg-[#0c0d14]/40 backdrop-blur-md">
-          <div className="flex items-center gap-3" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
-              <span>{spaces.find((s: any) => s.id === selectedSpaceId)?.icon || '📁'}</span>
-              <span>{spaces.find((s: any) => s.id === selectedSpaceId)?.name || selectedSpaceId}</span>
-            </div>
-            {activeSpace?.isSyncSpace && (
-              selectedSpaceId === currentSyncSpaceId ? (
-                <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium px-2 py-0.5 rounded-full" title="This space is designated to sync with this browser's bookmarks">
-                  ✓ Local Sync Active
-                </span>
-              ) : (
-                <button 
-                  className="text-[10px] bg-slate-950 hover:bg-slate-900 border border-white/5 text-slate-400 hover:text-white font-medium px-2 py-0.5 rounded-full transition-all cursor-pointer" 
-                  onClick={handleSetCurrentBrowserSyncSpace}
-                  title="Click to designate this space to sync with this browser's bookmarks"
-                >
-                  Set as Local Sync
-                </button>
-              )
-            )}
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            {selectedSpaceId === currentSyncSpaceId ? (
-              <button 
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-transparent text-slate-300 hover:bg-white/5 hover:text-white text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${isSyncing ? 'animate-pulse' : ''}`} 
-                onClick={handleSyncBrowser}
-                disabled={isSyncing}
-                title="Synchronize browser bookmarks with SyncTab database"
-              >
-                <RefreshCw size={14} className={isSyncing ? 'spin animate-spin' : ''} />
-                <span>{isSyncing ? 'Syncing...' : 'Sync with Browser'}</span>
-              </button>
-            ) : activeSpace?.isSyncSpace ? (
-              <button 
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-transparent text-slate-300 hover:bg-white/5 hover:text-white text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${isSyncing ? 'animate-pulse' : ''}`} 
-                onClick={handleSyncCloudOnly}
-                disabled={isSyncing}
-                title="Fetch latest bookmarks from backend"
-              >
-                <RefreshCw size={14} className={isSyncing ? 'spin animate-spin' : ''} />
-                <span>{isSyncing ? 'Syncing...' : 'Sync'}</span>
-              </button>
-            ) : null}
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-transparent text-slate-300 hover:bg-white/5 hover:text-white text-xs font-semibold transition-all cursor-pointer">
-              <Share2 size={14} /> Share
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-xs font-semibold transition-all cursor-pointer bg-indigo-600 border border-indigo-500 hover:bg-indigo-700" onClick={handleAddColumn}>
-              <Plus size={14} /> Add Column
-            </button>
+      {/* Open Tabs Drawer Overlay */}
+      {isTabsDrawerOpen && (
+        <div className="bm-mgr-drawer-overlay" onClick={() => setIsTabsDrawerOpen(false)}>
+          <div className="bm-mgr-drawer-content" onClick={e => e.stopPropagation()}>
+            <RecentTabs 
+              openTabs={openTabs} 
+              refreshOpenTabs={refreshOpenTabs} 
+              onClose={() => setIsTabsDrawerOpen(false)} 
+            />
           </div>
         </div>
-
-        <div className="flex-1 min-h-0 flex gap-5 p-6 overflow-x-auto overflow-y-hidden items-start select-none bg-slate-950/20" style={{ userSelect: ghost.visible ? 'none' : undefined }}>
-          {/* SPECIAL FIRST COLUMN: OPEN TABS */}
-          <RecentTabs openTabs={openTabs} refreshOpenTabs={refreshOpenTabs} />
-
-          {/* NORMAL BOOKMARK COLUMNS */}
-          {activeColumns.map(colName => {
-            const isAdding = showAddForm[colName] || false;
-            const list = (columnBookmarks[colName] || []).filter(b => b.id !== dragState.draggedId);
-            const isDraggingOver = dragState.overColName === colName;
-
-            return (
-              <BookmarkColumn
-                key={colName}
-                colName={colName}
-                list={list}
-                isAdding={isAdding}
-                setIsAdding={(adding) => setShowAddForm(prev => ({ ...prev, [colName]: adding }))}
-                isDraggingOver={isDraggingOver}
-                dragState={dragState}
-                selectedSpaceId={selectedSpaceId}
-                currentSyncSpaceId={currentSyncSpaceId}
-                openColMenu={openColMenu}
-                setOpenColMenu={setOpenColMenu}
-                editingColName={null} 
-                setEditingColName={() => {}}
-                editingColTempName=""
-                setEditingColTempName={() => {}}
-                handleRenameColumn={(name) => handleRenameColumn(colName, name)}
-                handleDeleteColumn={handleDeleteColumn}
-                openAllBookmarks={openAllBookmarks}
-                handleColumnHeaderDrop={handleColumnHeaderDrop}
-                handleDrawerTabDrop={handleDrawerTabDrop}
-                handleAddBookmarkSubmit={handleAddBookmarkSubmit}
-                ghost={ghost}
-                onPointerDown={onPointerDown}
-                onDeleteBookmark={handleDeleteBookmark}
-              />
-            );
-          })}
-        </div>
-      </div>
+      )}
 
       {/* 4. REUSABLE CUSTOM MODAL */}
       <CustomConfirmModal

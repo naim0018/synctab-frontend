@@ -183,7 +183,7 @@ function App() {
       />
 
       {/* Main content area */}
-      <main className={`main-content ${activeTab === 'dashboard' || customPages.some(p => p.id === activeTab) ? 'dashboard-mode' : ''}`}>
+      <main className={`main-content ${activeTab === 'dashboard' || customPages.some(p => p.id === activeTab) ? 'dashboard-mode' : ''} ${activeTab === 'bookmarks' ? 'bookmarks-mode' : ''}`}>
 
         <>
           {/* A. DASHBOARD / CUSTOM PAGES VIEW */}

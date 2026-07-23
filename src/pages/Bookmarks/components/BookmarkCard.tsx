@@ -22,6 +22,25 @@ interface BookmarkCardProps {
   onDeleteBookmark: (id: string, e: React.MouseEvent) => void;
 }
 
+const ACCENT_COLORS = [
+  '#3b82f6', // blue
+  '#ef4444', // red
+  '#10b981', // green
+  '#f59e0b', // yellow/orange
+  '#8b5cf6', // purple
+  '#ec4899', // pink
+  '#06b6d4', // cyan
+];
+
+const getAccentColor = (title: string) => {
+  let hash = 0;
+  for (let i = 0; i < title.length; i++) {
+    hash = title.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % ACCENT_COLORS.length;
+  return ACCENT_COLORS[index];
+};
+
 const getFavicon = (url: string) => {
   try {
     return `https://www.google.com/s2/favicons?sz=64&domain=${new URL(url).hostname}`;
@@ -32,7 +51,6 @@ const getFavicon = (url: string) => {
 
 export const BookmarkCard: React.FC<BookmarkCardProps> = ({
   bookmark,
-  cardIdx,
   colName,
   isDragged,
   showIndicatorBefore,
@@ -40,6 +58,8 @@ export const BookmarkCard: React.FC<BookmarkCardProps> = ({
   onPointerDown,
   onDeleteBookmark
 }) => {
+  const accentColor = getAccentColor(bookmark.title || bookmark.url);
+
   return (
     <>
       {showIndicatorBefore && (
@@ -47,11 +67,16 @@ export const BookmarkCard: React.FC<BookmarkCardProps> = ({
       )}
       <div
         data-card-id={bookmark.id}
-        className={`flex items-center gap-3 p-3 rounded-lg bg-slate-900/40 border border-white/5 hover:bg-white/5 hover:border-white/10 transition-all cursor-pointer relative group/card mb-2 ${isDragged ? 'opacity-30 border-dashed border-indigo-500/50' : ''}`}
+        className={`flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer relative group/card mb-2 ${isDragged ? 'opacity-30 border-dashed border-indigo-500/50' : ''}`}
+        style={{
+          background: 'var(--bm-card-bg)',
+          border: 'var(--bm-card-border)',
+          borderLeft: `3px solid ${accentColor}`,
+          boxShadow: 'var(--bm-card-shadow)',
+        }}
         onClick={() => !ghostVisible && window.open(bookmark.url, '_blank')}
         onPointerDown={e => onPointerDown(bookmark.id, colName, bookmark.title, e)}
       >
-        <span className="text-[10px] font-bold text-slate-500 min-w-[18px] text-right flex-shrink-0 leading-[14px]">{cardIdx + 1}</span>
         <div className="w-[14px] h-[14px] flex items-center justify-center flex-shrink-0">
           <img
             src={getFavicon(bookmark.url)}
@@ -61,9 +86,14 @@ export const BookmarkCard: React.FC<BookmarkCardProps> = ({
             onError={e => { e.currentTarget.style.display = 'none'; }}
           />
         </div>
-        <span className="text-xs font-medium text-slate-200 truncate flex-1 pr-6">{bookmark.title}</span>
+        <span 
+          className="text-xs font-semibold truncate flex-1 pr-6"
+          style={{ color: 'var(--bm-text-main)' }}
+        >
+          {bookmark.title}
+        </span>
         <button
-          className="absolute right-2.5 opacity-0 group-hover/card:opacity-100 bg-transparent border-none text-slate-500 hover:text-rose-400 cursor-pointer p-0.5 rounded transition-all hover:bg-white/5"
+          className="absolute right-2.5 opacity-0 group-hover/card:opacity-100 bg-transparent border-none text-slate-400 hover:text-rose-500 cursor-pointer p-0.5 rounded transition-all hover:bg-black/5 dark:hover:bg-white/5"
           onClick={e => onDeleteBookmark(bookmark.id, e)}
           title="Delete Bookmark"
         >

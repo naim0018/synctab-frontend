@@ -14,6 +14,14 @@ window.addEventListener('message', (event) => {
       }
     });
   }
+
+  if (event.data && event.data.type === 'SYNCTAB_QUERY_BOOKMARKS') {
+    chrome.runtime.sendMessage({ action: 'GET_BROWSER_BOOKMARKS' }, (response) => {
+      if (response && response.tree) {
+        window.postMessage({ type: 'SYNCTAB_BOOKMARKS_RESPONSE', tree: response.tree }, '*');
+      }
+    });
+  }
 });
 
 // Listen for tab updates from background and notify webpage

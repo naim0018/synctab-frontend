@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, X, FolderOpen, Edit2, Check } from 'lucide-react';
+import { Plus, X, FolderOpen, Check } from 'lucide-react';
 import BookmarkCard from './BookmarkCard';
 
 interface BookmarkItem {
@@ -84,12 +84,12 @@ export const BookmarkColumn: React.FC<BookmarkColumnProps> = ({
     <div 
       id={`col-${colName}`}
       data-col-drop-zone={colName}
-      className={`bg-slate-900/30 border border-white/5 rounded-xl flex flex-col h-full min-w-[280px] flex-shrink-0 select-none overflow-hidden transition-colors duration-200 ${isDraggingOver ? 'bg-slate-900/50 border-indigo-500/30' : ''}`}
+      className={`flex flex-col h-full min-w-[240px] max-w-[240px] flex-shrink-0 select-none overflow-hidden transition-all duration-200 rounded-xl ${isDraggingOver ? 'bg-black/5 dark:bg-white/5 border border-dashed border-indigo-500/20' : ''}`}
       onDragOver={e => e.preventDefault()}
       onDrop={e => { handleColumnHeaderDrop(e, colName); handleDrawerTabDrop(e, colName); }}
     >
       <div 
-        className="p-4 flex items-center justify-between border-b border-white/5 cursor-grab active:cursor-grabbing"
+        className="p-3 flex items-center justify-between cursor-grab active:cursor-grabbing group/col-header relative"
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData('application/json', JSON.stringify({ 
@@ -98,7 +98,7 @@ export const BookmarkColumn: React.FC<BookmarkColumnProps> = ({
           }));
         }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 overflow-hidden">
           {editingColName === colName ? (
             <div 
               className="flex items-center gap-1" 
@@ -109,12 +109,12 @@ export const BookmarkColumn: React.FC<BookmarkColumnProps> = ({
                 type="text" 
                 value={editingColTempName} 
                 onChange={e => setEditingColTempName(e.target.value)}
-                className="bg-slate-950 border border-white/5 rounded-md px-2 py-1 text-xs text-white outline-none focus:border-indigo-500/50 w-[120px]"
+                className="bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded px-2 py-0.5 text-xs text-slate-800 dark:text-white outline-none focus:border-indigo-500/50 w-[120px]"
                 autoFocus
                 required
               />
               <button 
-                className="bg-transparent border-none text-slate-500 hover:text-white cursor-pointer p-0.5 rounded hover:bg-white/5 transition-all" 
+                className="bg-transparent border-none text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all" 
                 onClick={(e) => {
                   e.stopPropagation();
                   handleRenameColumn(colName);
@@ -123,7 +123,7 @@ export const BookmarkColumn: React.FC<BookmarkColumnProps> = ({
                 <Check size={12} />
               </button>
               <button 
-                className="bg-transparent border-none text-slate-500 hover:text-white cursor-pointer p-0.5 rounded hover:bg-white/5 transition-all" 
+                className="bg-transparent border-none text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all" 
                 onClick={(e) => {
                   e.stopPropagation();
                   setEditingColName(null);
@@ -134,77 +134,85 @@ export const BookmarkColumn: React.FC<BookmarkColumnProps> = ({
             </div>
           ) : (
             <>
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">{colName}</span>
-              <span className="text-[10px] text-slate-500 bg-white/5 px-1.5 py-0.5 rounded font-medium">{list.length}</span>
+              <span className="text-[13px] font-bold truncate" style={{ color: 'var(--bm-text-main)' }}>
+                {colName}
+              </span>
+              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded-full" style={{ background: 'rgba(0,0,0,0.05)', color: 'var(--bm-text-sub)' }}>
+                {list.length}
+              </span>
             </>
           )}
         </div>
-        <div className="flex items-center gap-1 relative">
+        <div className="flex items-center gap-0.5 relative opacity-0 group-hover/col-header:opacity-100 transition-opacity duration-150" onDragStart={e => e.stopPropagation()}>
           <button 
-            className="bg-transparent border-none text-slate-500 hover:text-white cursor-pointer p-0.5 rounded hover:bg-white/5 transition-all" 
+            className="bg-transparent border-none text-slate-400 hover:text-indigo-500 cursor-pointer p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all" 
+            onClick={(e) => {
+              e.stopPropagation();
+              openAllBookmarks(colName, false);
+            }}
+            title="Open all in new tabs"
+          >
+            <FolderOpen size={12} />
+          </button>
+          
+          <button 
+            className="bg-transparent border-none text-slate-400 hover:text-indigo-500 cursor-pointer p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all" 
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsAdding(!isAdding);
+            }}
+            title="Add Link"
+          >
+            <Plus size={12} />
+          </button>
+
+          <button 
+            className="bg-transparent border-none text-slate-400 hover:text-indigo-500 cursor-pointer p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all" 
             onClick={(e) => {
               e.stopPropagation();
               setOpenColMenu(openColMenu === colName ? null : colName);
             }}
-            title="Open All Options"
-            onDragStart={(e) => e.stopPropagation()}
+            title="More Options"
           >
-            <FolderOpen size={14} />
+            <span style={{ fontSize: '12px', fontWeight: 'bold', display: 'inline-block', transform: 'translateY(-1px)' }}>⋮</span>
           </button>
-          {editingColName !== colName && (
-            <button 
-              className="bg-transparent border-none text-slate-500 hover:text-white cursor-pointer p-0.5 rounded hover:bg-white/5 transition-all" 
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditingColName(colName);
-                setEditingColTempName(colName);
-              }}
-              title="Rename Column"
-              onDragStart={(e) => e.stopPropagation()}
-            >
-              <Edit2 size={14} />
-            </button>
-          )}
-          <button 
-            className="bg-transparent border-none text-slate-500 hover:text-white cursor-pointer p-0.5 rounded hover:bg-white/5 transition-all" 
-            onClick={() => setIsAdding(!isAdding)}
-            title="Add Link"
-            onDragStart={(e) => e.stopPropagation()}
-          >
-            <Plus size={14} />
-          </button>
-          {selectedSpaceId !== currentSyncSpaceId && (
-            <button 
-              className="bg-transparent border-none text-slate-500 hover:text-white cursor-pointer p-0.5 rounded hover:bg-white/5 transition-all" 
-              onClick={() => handleDeleteColumn(colName)}
-              title="Delete Column"
-              onDragStart={(e) => e.stopPropagation()}
-            >
-              <X size={14} />
-            </button>
-          )}
 
           {/* Column Dropdown Menu */}
           {openColMenu === colName && (
-            <div className="absolute right-0 top-6 bg-slate-950 border border-white/10 rounded-lg p-1.5 shadow-xl min-w-[170px] z-50 flex flex-col gap-1" onClick={e => e.stopPropagation()}>
+            <div className="absolute right-0 top-6 bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-lg p-1 shadow-xl min-w-[150px] z-50 flex flex-col gap-0.5" onClick={e => e.stopPropagation()}>
+              {editingColName !== colName && (
+                <button 
+                  className="w-full text-left text-xs text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 p-1.5 rounded transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingColName(colName);
+                    setEditingColTempName(colName);
+                    setOpenColMenu(null);
+                  }}
+                >
+                  Rename Column
+                </button>
+              )}
               <button 
-                className="w-full text-left text-xs text-slate-300 hover:text-white hover:bg-white/5 p-2 rounded transition-colors cursor-pointer"
-                onClick={() => {
-                  openAllBookmarks(colName, false);
-                  setOpenColMenu(null);
-                }}
-              >
-                Open all in new tabs
-              </button>
-              <button 
-                className="w-full text-left text-xs text-slate-300 hover:text-white hover:bg-white/5 p-2 rounded transition-colors cursor-pointer"
+                className="w-full text-left text-xs text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 p-1.5 rounded transition-colors cursor-pointer"
                 onClick={() => {
                   openAllBookmarks(colName, true);
                   setOpenColMenu(null);
                 }}
               >
-                Open all in a new window
+                Open all in new window
               </button>
+              {selectedSpaceId !== currentSyncSpaceId && (
+                <button 
+                  className="w-full text-left text-xs text-rose-500 hover:bg-rose-500/10 p-1.5 rounded transition-colors cursor-pointer"
+                  onClick={() => {
+                    handleDeleteColumn(colName);
+                    setOpenColMenu(null);
+                  }}
+                >
+                  Delete Column
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -1523,6 +1523,11 @@
   overflow: hidden !important;
 }
 
+.main-content.bookmarks-mode {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
 /* Redesigned Collapsible Sidebar */
 .sidebar-container {
   display: flex;

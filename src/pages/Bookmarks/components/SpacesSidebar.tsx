@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Plus, Search, X, ChevronLeft, ChevronRight, ChevronDown, Trash2, Edit2, Check 
+  Plus, Search, X, ChevronLeft, ChevronRight, ChevronDown, Trash2, Edit2, Check, Folder, FolderOpen, Layers 
 } from 'lucide-react';
 
 interface Space {
@@ -11,6 +11,8 @@ interface Space {
 }
 
 interface SpacesSidebarProps {
+  isCollapsed: boolean;
+  setIsCollapsed: (c: boolean) => void;
   spaces: Space[];
   selectedSpaceId: string;
   onSelectSpace: (id: string) => void;
@@ -34,7 +36,38 @@ const parseCategory = (category: string): [string, string] => {
   return ['Personal', category || 'General'];
 };
 
+const getGroupedColumns = (colNames: string[]) => {
+  const folders: Record<string, Array<{ original: string; subName: string }>> = {};
+  const flats: string[] = [];
+
+  colNames.forEach(col => {
+    if (col.includes(' > ')) {
+      const parts = col.split(' > ');
+      const parent = parts[0].trim();
+      const child = parts.slice(1).join(' > ').trim();
+      if (!folders[parent]) {
+        folders[parent] = [];
+      }
+      folders[parent].push({ original: col, subName: child });
+    } else if (col.includes(' ❯ ')) {
+      const parts = col.split(' ❯ ');
+      const parent = parts[0].trim();
+      const child = parts.slice(1).join(' ❯ ').trim();
+      if (!folders[parent]) {
+        folders[parent] = [];
+      }
+      folders[parent].push({ original: col, subName: child });
+    } else {
+      flats.push(col);
+    }
+  });
+
+  return { folders, flats };
+};
+
 export const SpacesSidebar: React.FC<SpacesSidebarProps> = ({
+  isCollapsed: isSidebarCollapsed,
+  setIsCollapsed: setIsSidebarCollapsed,
   spaces,
   selectedSpaceId,
   onSelectSpace,
@@ -49,7 +82,7 @@ export const SpacesSidebar: React.FC<SpacesSidebarProps> = ({
   onDeleteColumn,
   onCategoryClick
 }) => {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>(() => {
     const userStr = localStorage.getItem('synctab_user');
     const user = userStr ? JSON.parse(userStr) : null;
@@ -101,13 +134,20 @@ export const SpacesSidebar: React.FC<SpacesSidebarProps> = ({
   return (
     <div className={`bm-mgr-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
       <div className="bm-mgr-sidebar-header">
-        <span className="bm-mgr-brand">SyncTab</span>
+        <div className="flex items-center gap-3">
+          <div className="brand-icon-wrapper" style={{ width: '32px', height: '32px', borderRadius: '8px' }}>
+            <Layers size={18} className="brand-logo-spark" />
+          </div>
+          {!isSidebarCollapsed && (
+            <span className="brand-title" style={{ fontSize: '16px' }}>Spaces</span>
+          )}
+        </div>
         <button 
           className="bm-mgr-collapse-btn" 
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
         >
-          {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          {isSidebarCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
         </button>
       </div>
 
@@ -277,91 +317,131 @@ export const SpacesSidebar: React.FC<SpacesSidebarProps> = ({
                   )}
 
                   {/* Category sub-list when expanded */}
-                  {!isSidebarCollapsed && !!expandedSpaces[space.id] && (
-                    <div className="bm-mgr-subcategories">
-                      {getActiveColumnsForSpace(space.id).map((colName, colIdx) => {
-                        const isColEditing = editingColName === colName && selectedSpaceId === space.id;
-
-                        return (
-                          <div key={colName} className="bm-mgr-subcat-wrapper">
-                            {isColEditing ? (
-                              <div className="bm-mgr-sidebar-inline-form" style={{ margin: '2px 8px' }}>
-                                <div className="bm-mgr-sidebar-inline-row">
-                                  <input 
-                                    type="text" 
-                                    value={editingColTempName} 
-                                    onChange={e => setEditingColTempName(e.target.value)}
-                                    className="bm-mgr-inline-input"
-                                    style={{ fontSize: '11px', padding: '4px 8px', flex: 1 }}
-                                    autoFocus
-                                    required
-                                  />
-                                </div>
-                                <div className="bm-mgr-inline-actions">
-                                  <button 
-                                    type="button" 
-                                    className="bm-mgr-inline-btn bm-mgr-inline-btn-cancel"
-                                    onClick={() => setEditingColName(null)}
-                                  >
-                                    <X size={10} />
-                                  </button>
-                                  <button 
-                                    type="button" 
-                                    className="bm-mgr-inline-btn bm-mgr-inline-btn-submit"
-                                    onClick={() => handleRenameColumnClick(colName)}
-                                  >
-                                    <Check size={10} />
-                                  </button>
-                                </div>
+                  {!isSidebarCollapsed && !!expandedSpaces[space.id] && (() => {
+                    const { folders, flats } = getGroupedColumns(getActiveColumnsForSpace(space.id));
+                    
+                    const renderColItem = (colName: string, displayLabel: string, indent: boolean = false) => {
+                      const isColEditing = editingColName === colName && selectedSpaceId === space.id;
+                      return (
+                        <div key={colName} className="bm-mgr-subcat-wrapper" style={indent ? { marginLeft: '12px' } : undefined}>
+                          {isColEditing ? (
+                            <div className="bm-mgr-sidebar-inline-form" style={{ margin: '2px 8px' }}>
+                              <div className="bm-mgr-sidebar-inline-row">
+                                <input 
+                                  type="text" 
+                                  value={editingColTempName} 
+                                  onChange={e => setEditingColTempName(e.target.value)}
+                                  className="bm-mgr-inline-input"
+                                  style={{ fontSize: '11px', padding: '4px 8px', flex: 1 }}
+                                  autoFocus
+                                  required
+                                />
                               </div>
-                            ) : (
+                              <div className="bm-mgr-inline-actions">
+                                <button 
+                                  type="button" 
+                                  className="bm-mgr-inline-btn bm-mgr-inline-btn-cancel"
+                                  onClick={() => setEditingColName(null)}
+                                >
+                                  <X size={10} />
+                                </button>
+                                <button 
+                                  type="button" 
+                                  className="bm-mgr-inline-btn bm-mgr-inline-btn-submit"
+                                  onClick={() => handleRenameColumnClick(colName)}
+                                >
+                                  <Check size={10} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div 
+                              className="bm-mgr-subcat-item"
+                              onClick={() => onCategoryClick(space.id, colName)}
+                            >
+                              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {displayLabel}
+                              </span>
+                              <span style={{ fontSize: '9px', fontWeight: 600, color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1px 5px' }}>
+                                {bookmarks.filter(b => { 
+                                  const [sp, col] = parseCategory(b.category); 
+                                  return sp === space.id && col === colName; 
+                                }).length}
+                              </span>
+
+                              {/* Column Actions (Edit / Delete) */}
+                              <div className="bm-mgr-subcat-actions" style={{ display: 'flex', gap: '4px', marginLeft: '6px' }}>
+                                <button 
+                                  className="bm-mgr-icon-btn" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingColName(colName);
+                                    setEditingColTempName(colName);
+                                  }}
+                                  title="Rename Column"
+                                >
+                                  <Edit2 size={9} />
+                                </button>
+                                <button 
+                                  className="bm-mgr-icon-btn" 
+                                  style={{ color: '#f87171' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteColumn(colName);
+                                  }}
+                                  title="Delete Column"
+                                >
+                                  <Trash2 size={9} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+
+                    return (
+                      <div className="bm-mgr-subcategories" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {/* Folders */}
+                        {Object.entries(folders).map(([folderName, children]) => {
+                          const isFolderExpanded = expandedFolders[folderName] || false;
+                          const totalBmsCount = children.reduce((acc, child) => {
+                            return acc + bookmarks.filter(b => {
+                              const [sp, col] = parseCategory(b.category);
+                              return sp === space.id && col === child.original;
+                            }).length;
+                          }, 0);
+
+                          return (
+                            <div key={folderName} style={{ display: 'flex', flexDirection: 'column' }}>
                               <div 
                                 className="bm-mgr-subcat-item"
-                                onClick={() => onCategoryClick(space.id, colName)}
+                                style={{ fontWeight: 600, color: 'rgba(255,255,255,0.7)', cursor: 'pointer' }}
+                                onClick={() => setExpandedFolders(prev => ({ ...prev, [folderName]: !isFolderExpanded }))}
                               >
-                                <span style={{ opacity: 0.35, marginRight: '4px', fontSize: '11px' }}>{colIdx + 1}.</span>
+                                <span style={{ marginRight: '6px', opacity: 0.5, display: 'inline-flex', alignItems: 'center' }}>
+                                  {isFolderExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                </span>
+                                <span style={{ marginRight: '6px', opacity: 0.7, display: 'inline-flex', alignItems: 'center' }}>
+                                  {isFolderExpanded ? <FolderOpen size={12} /> : <Folder size={12} />}
+                                </span>
                                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {colName}
+                                  {folderName}
                                 </span>
                                 <span style={{ fontSize: '9px', fontWeight: 600, color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '1px 5px' }}>
-                                  {bookmarks.filter(b => { 
-                                    const [sp, col] = parseCategory(b.category); 
-                                    return sp === space.id && col === colName; 
-                                  }).length}
+                                  {totalBmsCount}
                                 </span>
-
-                                {/* Column Actions (Edit / Delete) */}
-                                <div className="bm-mgr-subcat-actions" style={{ display: 'flex', gap: '4px', marginLeft: '6px' }}>
-                                  <button 
-                                    className="bm-mgr-icon-btn" 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEditingColName(colName);
-                                      setEditingColTempName(colName);
-                                    }}
-                                    title="Rename Column"
-                                  >
-                                    <Edit2 size={9} />
-                                  </button>
-                                  <button 
-                                    className="bm-mgr-icon-btn" 
-                                    style={{ color: '#f87171' }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onDeleteColumn(colName);
-                                    }}
-                                    title="Delete Column"
-                                  >
-                                    <Trash2 size={9} />
-                                  </button>
-                                </div>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                              {isFolderExpanded && children.map(child => renderColItem(child.original, child.subName, true))}
+                            </div>
+                          );
+                        })}
+
+                        {/* Flat Columns */}
+                        {flats.map(colName => renderColItem(colName, colName, false))}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
