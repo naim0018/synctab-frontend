@@ -17,10 +17,16 @@ import CustomizePage from './pages/Customize/CustomizePage';
 import { useSyncTabState } from './hooks/useSyncTabState';
 import BookmarksPage from './pages/Bookmarks/BookmarksPage';
 import IssuePage from './pages/Issue/IssuePage';
+import { useBookmarksManager } from './pages/Bookmarks/hooks/useBookmarksManager';
+import SpacesSidebar from './pages/Bookmarks/components/SpacesSidebar';
 
 function App() {
   const state = useSyncTabState();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const bookmarksManager = useBookmarksManager({
+    bookmarks: state.bookmarks,
+    onRefresh: () => state.fetchBookmarks()
+  });
 
   const combinedMenuItems = useMemo(() => {
     // Keep 'dashboard' at the top, then bookmarks, notes, tasks, reminders, chat, issues, customize, widgets, edit_widgets.
@@ -160,7 +166,7 @@ function App() {
   }
 
   return (
-    <div className={`app-container app-root ${isSidebarCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'}`}>
+    <div className={`app-container app-root ${isSidebarCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'} ${activeTab === 'bookmarks' ? (bookmarksManager.isRightSidebarCollapsed ? 'right-sidebar-collapsed' : 'right-sidebar-expanded') : 'no-right-sidebar'}`}>
       {/* Redesigned Single Left Sidebar */}
       <SidebarMenu
         menuItems={combinedMenuItems}
@@ -207,6 +213,7 @@ function App() {
             <BookmarksPage
               bookmarks={bookmarks}
               onRefresh={() => fetchBookmarks()}
+              manager={bookmarksManager}
             />
           )}
 
@@ -296,6 +303,30 @@ function App() {
           )}
         </>
       </main>
+
+      {/* Root-level right sidebar (only shown on Bookmarks page) */}
+      {activeTab === 'bookmarks' && (
+        <SpacesSidebar
+          isCollapsed={bookmarksManager.isRightSidebarCollapsed}
+          setIsCollapsed={bookmarksManager.setIsRightSidebarCollapsed}
+          spaces={bookmarksManager.spaces}
+          selectedSpaceId={bookmarksManager.selectedSpaceId}
+          onSelectSpace={bookmarksManager.setSelectedSpaceId}
+          searchQuery={bookmarksManager.searchQuery}
+          setSearchQuery={bookmarksManager.setSearchQuery}
+          bookmarks={bookmarksManager.bookmarks}
+          getActiveColumnsForSpace={bookmarksManager.getActiveColumnsForSpace}
+          onCreateSpace={bookmarksManager.handleCreateSpace}
+          onRenameSpace={bookmarksManager.handleRenameSpace}
+          onDeleteSpace={bookmarksManager.handleDeleteSpace}
+          onRenameColumn={bookmarksManager.handleRenameColumn}
+          onDeleteColumn={bookmarksManager.handleDeleteColumn}
+          onCategoryClick={(spaceId, colName) => {
+            bookmarksManager.setSelectedSpaceId(spaceId);
+            bookmarksManager.setPendingScrollColumn(colName);
+          }}
+        />
+      )}
 
       {/* Bookmark Modal */}
       <BookmarkModal
